@@ -12,15 +12,23 @@ export interface LeveragedExecution {
   note?: string;
 }
 
-export interface TradingInstrument {
+interface InstrumentDefinition {
   underlying: string;
   longExecution: LeveragedExecution | null;
   shortExecution: LeveragedExecution | null;
 }
 
+export interface TradingInstrument extends InstrumentDefinition {
+  /** Legacy/default display route. New code should use longExecution/shortExecution. */
+  execution: string;
+  leverage: number;
+  longOnly: boolean;
+  label: string;
+}
+
 // Liquidity snapshot is a routing aid, not a permanent ranking. The live app must still check quote freshness and spread.
 // Baseline volumes use the most recently verified completed session where available (2026-09-11).
-const EXECUTION_MAP: Record<string, TradingInstrument> = {
+const EXECUTION_MAP: Record<string, InstrumentDefinition> = {
   NVDA: {
     underlying: 'NVDA',
     longExecution: { ticker: 'NVDL', leverage: 2, side: 'LONG', label: 'GraniteShares 2x Long NVDA', liquidityTier: 'EXCELLENT', baselineVolume: 8_826_984, baselineDate: '2026-09-11' },
@@ -85,7 +93,15 @@ const EXECUTION_MAP: Record<string, TradingInstrument> = {
 
 export const getTradingInstrument = (symbol: string): TradingInstrument => {
   const upper = symbol.trim().toUpperCase();
-  return EXECUTION_MAP[upper] ?? { underlying: upper, longExecution: null, shortExecution: null };
+  const base = EXECUTION_MAP[upper] ?? { underlying: upper, longExecution: null, shortExecution: null };
+  const defaultExecution = base.longExecution;
+  return {
+    ...base,
+    execution: defaultExecution?.ticker ?? upper,
+    leverage: Math.abs(defaultExecution?.leverage ?? 1),
+    longOnly: base.shortExecution === null,
+    label: defaultExecution?.label ?? 'Direct underlying execution',
+  };
 };
 
 export const getExecutionForDirection = (symbol: string, direction: 'LONG' | 'SHORT' | 'WAIT') => {
