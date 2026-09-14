@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { CandlestickChart, Gauge, LineChart } from 'lucide-react';
 import App from './App';
-import DayTradingApp from './DayTradingApp';
+import DayTradingAppV2 from './DayTradingAppV2';
 
 type AppMode = 'strategic' | 'daytrade';
 
@@ -36,9 +36,9 @@ export default function ModeShell() {
         >
           <CandlestickChart size={13} /> 當沖模式
         </button>
-        <span className="hidden sm:inline-flex items-center gap-1 px-2 text-[10px] text-slate-600"><Gauge size={11} /> Dual Engine</span>
+        <span className="hidden sm:inline-flex items-center gap-1 px-2 text-[10px] text-slate-600"><Gauge size={11} /> 5m + Live</span>
       </div>
-      {mode === 'daytrade' ? <DayTradingApp /> : <App />}
+      {mode === 'daytrade' ? <DayTradingAppV2 /> : <App />}
     </>
   );
 }
