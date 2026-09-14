@@ -1,0 +1,33 @@
+name: NVDA strategy backtest
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'scripts/backtest-nvda.mjs'
+      - '.github/workflows/backtest-nvda.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run NVDA backtest
+        run: node scripts/backtest-nvda.mjs
+
+      - name: Upload backtest results
+        uses: actions/upload-artifact@v4
+        with:
+          name: nvda-backtest-results
+          path: backtest-output/
+          retention-days: 30
