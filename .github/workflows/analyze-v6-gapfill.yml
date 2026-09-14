@@ -1,0 +1,33 @@
+name: V6 gap-fill sensitivity
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'scripts/analyze-v6-gapfill.ts'
+      - '.github/workflows/analyze-v6-gapfill.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Analyze gap-fill sensitivity
+        run: npx --yes tsx scripts/analyze-v6-gapfill.ts
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v6-gapfill-sensitivity
+          path: backtest-output-v6-gapfill/
+          retention-days: 30
