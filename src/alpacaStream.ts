@@ -55,6 +55,12 @@ const RECONNECT_MS = 3000;
 export const connectAlpacaIexMulti = ({ symbols, credentials, onStatus, onSnapshot }: AlpacaMultiStreamOptions) => {
   const uppers = [...new Set(symbols.map(s => s.trim().toUpperCase()).filter(Boolean))];
   const subscribed = new Set(uppers);
+  // Alpaca Basic is limited to 30 websocket symbols. The ranking UI needs quotes
+  // for the execution universe, but only the active underlying needs trade ticks.
+  // Keeping trades to the first symbol prevents trades+quotes from exceeding the
+  // free subscription allowance while retaining live spread checks for all ETFs.
+  const tradeSymbols = uppers.length ? [uppers[0]] : [];
+  const quoteSymbols = uppers;
   const keyId = credentials.keyId.trim();
   const secret = credentials.secret.trim();
   let socket: WebSocket | null = null;
@@ -106,18 +112,22 @@ export const connectAlpacaIexMulti = ({ symbols, credentials, onStatus, onSnapsh
           continue;
         }
         if (msg?.T === 'success' && msg?.msg === 'authenticated') {
-          send({ action: 'subscribe', trades: uppers, quotes: uppers });
+          send({ action: 'subscribe', trades: tradeSymbols, quotes: quoteSymbols });
           continue;
         }
         if (msg?.T === 'subscription') {
-          onStatus('connected', `Alpaca IEX 即時串流：${uppers.join(' / ')}`);
+          onStatus('connected', `Alpaca IEX：Quotes ${quoteSymbols.length} symbols · Trades ${tradeSymbols.join(' / ') || '—'}`);
           continue;
         }
         if (msg?.T === 'error') {
           const code = Number(msg?.code);
-          const text = `Alpaca ${msg?.code ?? ''}: ${msg?.msg ?? 'stream error'}`.trim();
+          const rawMsg = String(msg?.msg ?? 'stream error');
+          const friendly = code === 405
+            ? 'symbol limit exceeded；已超過 Alpaca Basic WebSocket 訂閱上限'
+            : rawMsg;
+          const text = `Alpaca ${msg?.code ?? ''}: ${friendly}`.trim();
           onStatus('error', text);
-          if ([402, 406, 409].includes(code)) {
+          if ([402, 405, 406, 409].includes(code)) {
             fatalError = true;
             socket?.close();
           }
