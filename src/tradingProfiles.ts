@@ -1,6 +1,6 @@
 import type { DayTradeDecision, DayTradeDecisionInput } from './intraday';
 
-export type ProfileFamily = 'SEMICONDUCTOR' | 'SOFTWARE' | 'OPTICAL' | 'EV_GROWTH' | 'SPACE_IPO' | 'DEFAULT';
+export type ProfileFamily = 'SEMICONDUCTOR' | 'SOFTWARE' | 'OPTICAL' | 'EV_GROWTH' | 'HARDWARE' | 'SPACE_IPO' | 'DEFAULT';
 
 export interface TradingProfile {
   symbol: string;
@@ -36,7 +36,7 @@ const make = (profile: Partial<TradingProfile> & Pick<TradingProfile, 'symbol' |
   ...profile,
 });
 
-export const WATCHLIST = ['NVDA', 'AMD', 'LITE', 'ORCL', 'RMBS', 'CRM', 'TSLA', 'SPCX', 'MU', 'SNDK', 'AVGO'];
+export const WATCHLIST = ['NVDA', 'AMD', 'LITE', 'ORCL', 'RMBS', 'CRM', 'TSLA', 'SPCX', 'MU', 'SNDK', 'AVGO', 'DELL'];
 
 const PROFILES: Record<string, TradingProfile> = {
   NVDA: make({ symbol: 'NVDA', family: 'SEMICONDUCTOR', label: 'AI GPU / Semiconductor', benchmark: 'SOXX', secondaryBenchmark: 'QQQ', note: '以 SOXX 做產業 RS，QQQ 作市場成長股背景。' }),
@@ -48,6 +48,7 @@ const PROFILES: Record<string, TradingProfile> = {
   ORCL: make({ symbol: 'ORCL', family: 'SOFTWARE', label: 'Enterprise Software / Cloud', benchmark: 'IGV', secondaryBenchmark: 'QQQ', note: '以 IGV 判斷軟體族群同步性，QQQ 作次要市場背景。' }),
   CRM: make({ symbol: 'CRM', family: 'SOFTWARE', label: 'Enterprise SaaS', benchmark: 'IGV', secondaryBenchmark: 'QQQ', note: '軟體股應優先相對 IGV，而不是只與半導體／整體 Nasdaq 比。' }),
   LITE: make({ symbol: 'LITE', family: 'OPTICAL', label: 'Optical / Photonics', benchmark: 'XLK', secondaryBenchmark: 'QQQ', note: '目前用 XLK 作 sector proxy；未來可再加入 COHR/CIEN peer basket。' }),
+  DELL: make({ symbol: 'DELL', family: 'HARDWARE', label: 'AI Infrastructure / Enterprise Hardware', benchmark: 'XLK', secondaryBenchmark: 'QQQ', note: 'DELL 以 XLK 作硬體/科技 sector proxy，QQQ 作次要 AI 成長市場背景。' }),
   TSLA: make({ symbol: 'TSLA', family: 'EV_GROWTH', label: 'EV / High-beta Growth', benchmark: 'XLY', secondaryBenchmark: 'QQQ', minStopAtr: 0.75, note: 'TSLA 高波動，停損下限提高到 0.75 ATR；XLY 為主要 sector proxy。' }),
   SPCX: make({ symbol: 'SPCX', family: 'SPACE_IPO', label: 'Space / New Listing', benchmark: 'XAR', secondaryBenchmark: 'QQQ', minRvol: 1.5, highConvictionRvol: 2.0, minStopAtr: 0.8, minEntryMinute: 10 * 60 + 15, experimental: true, note: '上市歷史較短，長週期統計不足；採較嚴格 RVOL、ATR 與 10:15 後條件，屬實驗型 profile。' }),
 };
