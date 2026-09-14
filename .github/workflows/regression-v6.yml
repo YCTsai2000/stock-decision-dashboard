@@ -24,7 +24,7 @@ jobs:
         with:
           node-version: 22
       - name: Install dependencies
-        run: npm ci
+        run: npm install --no-audit --no-fund
       - name: Run V6 event convergence regression
         run: npx --yes tsx scripts/regression-v6-events.ts
       - name: Upload regression results
