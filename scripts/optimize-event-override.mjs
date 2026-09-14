@@ -1,0 +1,61 @@
+import fs from 'node:fs/promises';
+
+const WATCHLIST = {
+  NVDA:{bench:'SOXX',stopAtr:.65}, AMD:{bench:'SOXX',stopAtr:.65}, AVGO:{bench:'SOXX',stopAtr:.65}, MU:{bench:'SOXX',stopAtr:.65}, SNDK:{bench:'SOXX',stopAtr:.65}, RMBS:{bench:'SOXX',stopAtr:.65},
+  ORCL:{bench:'IGV',stopAtr:.65}, CRM:{bench:'IGV',stopAtr:.65}, LITE:{bench:'XLK',stopAtr:.65}, DELL:{bench:'XLK',stopAtr:.65}, TSLA:{bench:'XLY',stopAtr:.75}, SPCX:{bench:'XAR',stopAtr:.8},
+};
+const OPEN=570,CLOSE=960,OR_END=585,COST_BPS_PER_SIDE=2;
+const FROM='2026-07-17', TO='2026-09-12', DAILY_FROM='2026-01-01';
+const sum=a=>a.reduce((x,y)=>x+y,0); const mean=a=>a.length?sum(a)/a.length:0; const clamp=(x,a=0,b=100)=>Math.min(Math.max(x,a),b);
+const epoch=s=>Math.floor(new Date(`${s}T00:00:00Z`).getTime()/1000);
+function nyParts(ms){const p=new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(new Date(ms));const g=t=>p.find(x=>x.type===t)?.value??'';const time=`${g('hour')}:${g('minute')}`;const [h,m]=time.split(':').map(Number);return{date:`${g('year')}-${g('month')}-${g('day')}`,time,minute:h*60+m}}
+async function yahoo(symbol,interval,from,to){const url=`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?period1=${epoch(from)}&period2=${epoch(to)}&interval=${interval}&includePrePost=false&events=div%2Csplits`;const r=await fetch(url,{headers:{'User-Agent':'Mozilla/5.0 stock-dashboard-event-optimizer','Accept':'application/json'}});if(!r.ok)throw new Error(`${symbol} ${interval}: HTTP ${r.status}`);const j=await r.json();const x=j?.chart?.result?.[0];if(!x)throw new Error(`${symbol}: ${j?.chart?.error?.description??'no data'}`);const q=x.indicators?.quote?.[0]??{},adj=x.indicators?.adjclose?.[0]?.adjclose??[],out=[];for(let i=0;i<(x.timestamp??[]).length;i++){const o=q.open?.[i],h=q.high?.[i],l=q.low?.[i],c=q.close?.[i],v=q.volume?.[i];if(![o,h,l,c].every(Number.isFinite))continue;const p=nyParts(x.timestamp[i]*1000);out.push({...p,epoch:x.timestamp[i]*1000,open:+o,high:+h,low:+l,close:+c,adjClose:Number.isFinite(adj[i])?+adj[i]:+c,volume:Number.isFinite(v)?+v:0})}return out.sort((a,b)=>a.epoch-b.epoch)}
+const reg=a=>a.filter(b=>b.minute>=OPEN&&b.minute<CLOSE);
+function byDate(a){const m=new Map();for(const b of a){if(!m.has(b.date))m.set(b.date,[]);m.get(b.date).push(b)}for(const x of m.values())x.sort((a,b)=>a.epoch-b.epoch);return m}
+function ma(a,n){return a.length<n?null:mean(a.slice(-n).map(x=>x.close))}
+function bias(d,date){const p=d.filter(x=>x.date<date);if(p.length<60)return'NEUTRAL';const c=p.at(-1).close,m20=ma(p,20),m60=ma(p,60);return c>m20&&m20>m60?'LONG':c<m20&&m20<m60?'SHORT':'NEUTRAL'}
+function market(spy,qqq,date){const s=spy.filter(x=>x.date<date),q=qqq.filter(x=>x.date<date);if(s.length<50||q.length<50)return'NEUTRAL';const sc=s.at(-1).close,qc=q.at(-1).close,s20=ma(s,20),s50=ma(s,50),q20=ma(q,20),q50=ma(q,50);if(sc>s20&&s20>s50&&qc>q20&&q20>q50)return'RISK_ON';if(sc<s20&&s20<s50&&qc<q20&&q20<q50)return'RISK_OFF';return'NEUTRAL'}
+function vw(a){let pv=0,v=0;return a.map(b=>{const t=(b.high+b.low+b.close)/3;if(b.volume>0){pv+=t*b.volume;v+=b.volume}return v?pv/v:b.close})}
+function atr(a,n=14){if(a.length<=n)return null;const s=a.slice(-(n+1)),tr=[];for(let i=1;i<s.length;i++)tr.push(Math.max(s[i].high-s[i].low,Math.abs(s[i].high-s[i-1].close),Math.abs(s[i].low-s[i-1].close)));return mean(tr)}
+function rvol(map,dates,date,min){const prior=dates.filter(d=>d<date).slice(-10);if(prior.length<3)return null;const cur=sum((map.get(date)||[]).filter(b=>b.minute>=OPEN&&b.minute<=min).map(b=>b.volume));const hist=prior.map(d=>sum((map.get(d)||[]).filter(b=>b.minute>=OPEN&&b.minute<=min).map(b=>b.volume))).filter(x=>x>0);return hist.length>=3?cur/mean(hist):null}
+function bmMetric(day,min){const x=day.filter(b=>b.minute>=OPEN&&b.minute<=min);if(!x.length)return{ret:null,above:null};const vs=vw(x),v=vs.at(-1);return{ret:(x.at(-1).close/x[0].open-1)*100,above:x.at(-1).close>v}}
+function metric(prefix,oh,ol,rv,bm){const price=prefix.at(-1).close,vs=vw(prefix),vwap=vs.at(-1),a=atr(prefix)??Math.max(price*.002,.01),rs=bm.ret==null?null:(price/prefix[0].open-1)*100-bm.ret,recent=prefix.slice(-4);return{minute:prefix.at(-1).minute,time:prefix.at(-1).time,price,vwap,slope:vs.length>=4?vs.at(-1)>vs.at(-4):null,atr:a,below:price<vwap,brokeLow:price<ol,rs,rv,benchmarkAboveVwap:bm.above,recentHigh:Math.max(...recent.map(b=>b.high)),orLow:ol}}
+function shortScore(m,bias,mode){let s=0;s+=bias==='SHORT'?10:bias==='NEUTRAL'?3:0;s+=mode==='RISK_OFF'?15:mode==='NEUTRAL'?5:0;if(m.benchmarkAboveVwap===false)s+=15;if(m.below)s+=12;if(m.slope===false)s+=8;if(m.brokeLow)s+=20;const rv=m.rv??0;s+=rv>=2?10:rv>=1.5?8:rv>=1.2?6:rv>=1?3:0;const rs=m.rs;if(rs!==null){if(rs<=-.5)s+=10;else if(rs<=-.2)s+=7;else if(rs<0)s+=4}return clamp(s)}
+function longScoreForLead(m,bias,mode){let l=0;l+=bias==='LONG'?10:bias==='NEUTRAL'?5:0;l+=mode==='RISK_ON'?15:mode==='NEUTRAL'?8:0;if(m.benchmarkAboveVwap===true)l+=15;if(!m.below)l+=12;if(m.slope===true)l+=8;const rv=m.rv??0;l+=rv>=2?10:rv>=1.5?8:rv>=1.2?6:rv>=1?3:0;const rs=m.rs;if(rs!==null){if(rs>=.5)l+=10;else if(rs>=.2)l+=7;else if(rs>0)l+=4}return clamp(l)}
+function levels(s,entry,stopAtr){const a=s.atr,c=[s.vwap+a*.25,s.orLow+a*.2,s.recentHigh+a*.1].filter(v=>v>entry),structural=c.length?Math.min(...c):entry+a*.5,stop=Math.max(entry+a*stopAtr,structural);return{stop,risk:Math.max(.01,stop-entry)}}
+function simulate(day,i,s,stopAtr,targetR){const entry=day[i].open,l=levels(s,entry,stopAtr),target=entry-targetR*l.risk;let outcome='EOD',exit=day.at(-1).close,exitTime=day.at(-1).time;for(let j=i;j<day.length;j++){const b=day[j];const hitStop=b.high>=l.stop,hitTarget=b.low<=target;if(hitStop&&hitTarget){outcome='STOP_SAME_BAR';exit=l.stop;exitTime=b.time;break}if(hitStop){outcome='STOP';exit=l.stop;exitTime=b.time;break}if(hitTarget){outcome='TARGET';exit=target;exitTime=b.time;break}}const grossR=(entry-exit)/l.risk,costR=(entry*(COST_BPS_PER_SIDE*2/10000))/l.risk;return{entry,entryTime:day[i].time,stop:l.stop,target,risk:l.risk,outcome,exit,exitTime,grossR,netR:grossR-costR}}
+function stats(t){const v=t.map(x=>x.trade.netR),w=v.filter(x=>x>0),l=v.filter(x=>x<0),pos=sum(w),neg=-sum(l);let eq=0,peak=0,dd=0;for(const r of v){eq+=r;peak=Math.max(peak,eq);dd=Math.max(dd,peak-eq)}return{trades:t.length,winRate:t.length?w.length/t.length*100:0,avgR:mean(v),totalR:sum(v),profitFactor:neg?pos/neg:null,maxDrawdownR:dd}}
+function symbolStats(t){return Object.fromEntries([...new Set(t.map(x=>x.symbol))].map(s=>[s,stats(t.filter(x=>x.symbol===s))]))}
+
+await fs.mkdir('backtest-output-event-override',{recursive:true});
+const benches=[...new Set(Object.values(WATCHLIST).map(x=>x.bench))];
+const [spyD,qqqD]=await Promise.all([yahoo('SPY','1d',DAILY_FROM,TO),yahoo('QQQ','1d',DAILY_FROM,TO)]);
+const benchmarkData={};for(const b of benches){try{benchmarkData[b]=byDate(reg(await yahoo(b,'5m',FROM,TO)))}catch(e){console.warn('benchmark skip',b,e.message)}}
+const universe=[];
+for(const [symbol,p] of Object.entries(WATCHLIST)){
+  try{
+    const [bars,daily]=await Promise.all([yahoo(symbol,'5m',FROM,TO),yahoo(symbol,'1d',DAILY_FROM,TO)]);const map=byDate(reg(bars)),dates=[...map.keys()].sort(),bmMap=benchmarkData[p.bench];if(!bmMap)continue;
+    for(let di=1;di<dates.length;di++){
+      const date=dates[di],day=map.get(date)||[],prev=map.get(dates[di-1])||[],bday=bmMap.get(date)||[];if(day.length<20||prev.length<20||bday.length<20)continue;
+      const db=bias(daily,date),mode=market(spyD,qqqD,date);if(db!=='LONG'||mode==='RISK_ON')continue;
+      const gap=(day[0].open/prev.at(-1).close-1)*100;if(gap<1.5)continue;
+      const opening=day.filter(b=>b.minute>=OPEN&&b.minute<OR_END);if(opening.length<2)continue;const oh=Math.max(...opening.map(x=>x.high)),ol=Math.min(...opening.map(x=>x.low));
+      const timeline=[];for(let i=0;i<day.length;i++){const bar=day[i];if(bar.minute<OR_END)continue;const pre=day.slice(0,i+1),rv=rvol(map,dates,date,bar.minute),bm=bmMetric(bday,bar.minute),m=metric(pre,oh,ol,rv,bm);m.shortScore=shortScore(m,db,mode);m.longScore=longScoreForLead(m,db,mode);timeline.push({...m,index:i})}
+      universe.push({symbol,date,gap,db,mode,stopAtr:p.stopAtr,day,timeline});
+    }
+  }catch(e){console.warn('symbol skip',symbol,e.message)}
+}
+universe.sort((a,b)=>a.date.localeCompare(b.date)||a.symbol.localeCompare(b.symbol));
+const uniqueDates=[...new Set(universe.map(x=>x.date))].sort(),splitDate=uniqueDates[Math.max(1,Math.floor(uniqueDates.length*.6))-1]??'9999-99-99';
+const grid=[];for(const minGap of [2,3,4,5])for(const minRvol of [1.5,2,3,4])for(const maxRs of [-.5,-1,-1.5,-2])for(const startMinute of [600,615,630])for(const minScore of [80,85])for(const stopExtra of [0,.15])for(const targetR of [1.75,2])grid.push({minGap,minRvol,maxRs,startMinute,minScore,stopExtra,targetR});
+function run(cfg,cases){const trades=[];for(const c of cases){if(c.gap<cfg.minGap)continue;let sig=null;for(const x of c.timeline){if(x.minute<cfg.startMinute)continue;const ready=(x.rv??0)>=cfg.minRvol&&x.below&&x.slope===false&&x.benchmarkAboveVwap===false&&(x.rs??0)<=cfg.maxRs&&x.brokeLow&&x.shortScore>=cfg.minScore&&x.shortScore-x.longScore>=15;if(ready&&x.index+1<c.day.length){sig=x;break}}if(sig){const trade=simulate(c.day,sig.index+1,sig,c.stopAtr+cfg.stopExtra,cfg.targetR);trades.push({symbol:c.symbol,date:c.date,gap:c.gap,signalTime:sig.time,rvol:sig.rv,rs:sig.rs,score:sig.shortScore,trade})}}return trades}
+const trainCases=universe.filter(x=>x.date<=splitDate),valCases=universe.filter(x=>x.date>splitDate);
+const rows=[];for(const cfg of grid){const tr=run(cfg,trainCases),va=run(cfg,valCases),ts=stats(tr),vs=stats(va),by=symbolStats(va);const positiveSymbols=Object.values(by).filter(x=>x.avgR>0).length;const objective=(ts.trades>=4?ts.avgR:ts.avgR-.5)+(ts.profitFactor??0)*.05-Math.max(0,ts.maxDrawdownR-4)*.03;rows.push({cfg,train:ts,validation:vs,validationPositiveSymbols:positiveSymbols,objective,tradesTrain:tr,tradesValidation:va})}
+rows.sort((a,b)=>b.objective-a.objective);
+const eligible=rows.filter(x=>x.train.trades>=4&&x.validation.trades>=3&&x.validation.avgR>0&&(x.validation.profitFactor??0)>1);
+const robust=eligible.sort((a,b)=>(b.validation.avgR-a.validation.avgR)||((b.validation.profitFactor??0)-(a.validation.profitFactor??0)));const best=robust[0]??rows[0];
+const neighborhood=rows.filter(x=>Math.abs(x.cfg.minGap-best.cfg.minGap)<=1&&Math.abs(x.cfg.minRvol-best.cfg.minRvol)<=1&&Math.abs(x.cfg.maxRs-best.cfg.maxRs)<=1&&Math.abs(x.cfg.startMinute-best.cfg.startMinute)<=15&&Math.abs(x.cfg.minScore-best.cfg.minScore)<=5&&Math.abs(x.cfg.stopExtra-best.cfg.stopExtra)<=.15&&Math.abs(x.cfg.targetR-best.cfg.targetR)<=.25).slice(0,50);const positiveNeighbor=neighborhood.filter(x=>x.validation.trades>=2&&x.validation.avgR>0&&(x.validation.profitFactor??0)>1).length;
+const result={range:{from:FROM,to:TO,splitDate},cases:{total:universe.length,train:trainCases.length,validation:valCases.length,dates:uniqueDates.length},best:{cfg:best.cfg,train:best.train,validation:best.validation,validationPositiveSymbols:best.validationPositiveSymbols,trainTrades:best.tradesTrain,validationTrades:best.tradesValidation},robustEligibleCount:eligible.length,neighborhood:{count:neighborhood.length,positiveValidation:positiveNeighbor},top20:rows.slice(0,20).map(x=>({cfg:x.cfg,train:x.train,validation:x.validation,positiveSymbols:x.validationPositiveSymbols})),caseSummary:universe.map(x=>({symbol:x.symbol,date:x.date,gap:x.gap,market:x.mode}))};
+await fs.writeFile('backtest-output-event-override/result.json',JSON.stringify(result,null,2));
+await fs.writeFile('backtest-output-event-override/top20.csv',['gap,rvol,maxRs,start,minScore,stopExtra,targetR,trainN,trainAvgR,trainPF,valN,valAvgR,valPF',...rows.slice(0,20).map(x=>[x.cfg.minGap,x.cfg.minRvol,x.cfg.maxRs,x.cfg.startMinute,x.cfg.minScore,x.cfg.stopExtra,x.cfg.targetR,x.train.trades,x.train.avgR,x.train.profitFactor??'',x.validation.trades,x.validation.avgR,x.validation.profitFactor??''].join(','))].join('\n'));
+console.log(JSON.stringify(result,null,2));
