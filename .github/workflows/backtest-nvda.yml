@@ -5,6 +5,7 @@ on:
   push:
     paths:
       - 'scripts/backtest-nvda.mjs'
+      - 'scripts/backtest-v3.mjs'
       - '.github/workflows/backtest-nvda.yml'
 
 permissions:
@@ -22,12 +23,22 @@ jobs:
         with:
           node-version: 22
 
-      - name: Run NVDA backtest
+      - name: Run NVDA baseline backtest
         run: node scripts/backtest-nvda.mjs
 
-      - name: Upload backtest results
+      - name: Run v3 A/B cross-sectional backtest
+        run: node scripts/backtest-v3.mjs
+
+      - name: Upload baseline results
         uses: actions/upload-artifact@v4
         with:
           name: nvda-backtest-results
           path: backtest-output/
+          retention-days: 30
+
+      - name: Upload v3 comparison results
+        uses: actions/upload-artifact@v4
+        with:
+          name: strategy-v3-comparison
+          path: backtest-output-v3/
           retention-days: 30
