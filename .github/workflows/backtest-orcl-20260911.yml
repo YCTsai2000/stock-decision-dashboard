@@ -1,0 +1,33 @@
+name: ORCL 2026-09-11 V5 replay
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'scripts/backtest-orcl-20260911.mjs'
+      - '.github/workflows/backtest-orcl-20260911.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Replay ORCL V5 strategy
+        run: node scripts/backtest-orcl-20260911.mjs
+
+      - name: Upload replay results
+        uses: actions/upload-artifact@v4
+        with:
+          name: orcl-2026-09-11-v5-replay
+          path: backtest-output-orcl-20260911/
+          retention-days: 30
