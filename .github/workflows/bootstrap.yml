@@ -26,7 +26,7 @@ jobs:
           tar -tzf /tmp/project.tar.gz > /tmp/archive-list.txt
           tar -xzf /tmp/project.tar.gz -C .
           rm -rf .bootstrap
-          rm -f .github/workflows/bootstrap.yml
+          rm -f .github/workflows/deploy.yml
 
       - name: Commit expanded source
         shell: bash
