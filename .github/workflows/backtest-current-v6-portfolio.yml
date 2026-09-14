@@ -1,0 +1,33 @@
+name: Current V6 watchlist backtest
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'scripts/backtest-current-v6-portfolio.ts'
+      - '.github/workflows/backtest-current-v6-portfolio.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Run watchlist backtest
+        run: npx --yes tsx scripts/backtest-current-v6-portfolio.ts
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: current-v6-watchlist-backtest
+          path: backtest-output-current-v6/
+          retention-days: 30
