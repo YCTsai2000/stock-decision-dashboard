@@ -10,7 +10,7 @@ import {
   computeIntradayMetrics, fetchIntradayData, getNewYorkClock, getSessionPhase,
   type DayTradeDecisionInput, type IntradayFetchResult, type SessionPhase,
 } from './intraday';
-import { buildProfiledDayTradeDecision } from './decisionV6';
+import { buildProfiledDayTradeDecision, decisionRiskFactor } from './decisionV6';
 import {
   connectAlpacaIexMulti, EMPTY_ALPACA_SNAPSHOT,
   type AlpacaCredentials, type AlpacaLiveSnapshot, type AlpacaStreamStatus,
@@ -203,8 +203,8 @@ export default function DayTradingAppV5() {
 
   const stopPct = decision.entry && decision.stop ? Math.abs(decision.entry - decision.stop) / decision.entry : null;
   const etfRiskPerShare = executionPrice && stopPct && execution ? executionPrice * stopPct * Math.abs(execution.leverage) : null;
-  const eventRiskFactor = decision.label.includes('EVENT REVERSAL') ? 0.5 : 1;
-  const sharesRisk = etfRiskPerShare ? Math.floor((account * riskPct / 100 * eventRiskFactor) / etfRiskPerShare) : 0;
+  const executionRiskFactor = decisionRiskFactor(decision);
+  const sharesRisk = etfRiskPerShare ? Math.floor((account * riskPct / 100 * executionRiskFactor) / etfRiskPerShare) : 0;
   const sharesAlloc = executionPrice ? Math.floor((account * maxAlloc / 100) / executionPrice) : 0;
   const shares = executionAllowed ? Math.max(0, Math.min(sharesRisk, sharesAlloc)) : 0;
 
@@ -245,7 +245,7 @@ export default function DayTradingAppV5() {
     <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
       <header className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <div className="mb-1 flex items-center gap-2 text-sm font-bold text-cyan-400"><Zap size={16}/> DAY TRADING V5 · SETUP FIRST</div>
+          <div className="mb-1 flex items-center gap-2 text-sm font-bold text-cyan-400"><Zap size={16}/> DAY TRADING V6.2 · ITERATIVE MODEL</div>
           <h1 className="text-2xl font-black text-white md:text-3xl">先完成設定，再開始分析</h1>
           <p className="mt-2 max-w-4xl text-xs text-slate-500">所有需要輸入的 API、Alpaca、資金風控、股票與 Benchmark 都集中在頁面頂端；下方只保留排名、分析與即時風控。</p>
         </div>
