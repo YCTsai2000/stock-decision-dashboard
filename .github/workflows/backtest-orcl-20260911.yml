@@ -5,6 +5,7 @@ on:
   push:
     paths:
       - 'scripts/backtest-orcl-20260911.mjs'
+      - 'scripts/diagnose-orcl-event-override.mjs'
       - '.github/workflows/backtest-orcl-20260911.yml'
 
 permissions:
@@ -25,9 +26,19 @@ jobs:
       - name: Replay ORCL V5 strategy
         run: node scripts/backtest-orcl-20260911.mjs
 
+      - name: Diagnose event-day short override
+        run: node scripts/diagnose-orcl-event-override.mjs
+
       - name: Upload replay results
         uses: actions/upload-artifact@v4
         with:
           name: orcl-2026-09-11-v5-replay
           path: backtest-output-orcl-20260911/
+          retention-days: 30
+
+      - name: Upload event-override diagnostic
+        uses: actions/upload-artifact@v4
+        with:
+          name: orcl-2026-09-11-event-override
+          path: backtest-output-orcl-event-override/
           retention-days: 30
