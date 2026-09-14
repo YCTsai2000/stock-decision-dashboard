@@ -86,7 +86,9 @@ export const applyTradingProfile = (
   const m = input.metrics;
   const minute = m.latestMinute;
   const price = m.currentPrice;
-  const atr = m.intradayAtr;
+  // Early in the session ATR(14) is not warmed up yet. Do not bypass the profile
+  // stop floor; use the same conservative fallback as the core decision engine.
+  const atr = m.intradayAtr ?? (price !== null ? Math.max(price * 0.002, 0.01) : null);
   const rvol = m.rvol;
   const brokeOrHigh = price !== null && m.orHigh !== null && m.orReady && price > m.orHigh;
   const brokeOrLow = price !== null && m.orLow !== null && m.orReady && price < m.orLow;
