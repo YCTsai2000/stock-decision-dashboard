@@ -1,13 +1,14 @@
 import fs from 'node:fs/promises';
-import { buildProfiledDayTradeDecision } from '../src/decisionV6';
+import { buildProfiledDayTradeDecision, EVENT_SHORT_RULE } from '../src/decisionV6';
 import { computeIntradayMetrics, getSessionPhase, type IntradayBar, type DayTradeDecisionInput } from '../src/intraday';
-import { getTradingProfile, WATCHLIST } from '../src/tradingProfiles';
+import { getTradingProfile, WATCHLIST, type TradingProfile } from '../src/tradingProfiles';
 
 const FROM = '2026-07-17';
 const TO = '2026-09-15';
 const DAILY_FROM = '2026-03-01';
 const OPEN = 9 * 60 + 30;
 const CLOSE = 16 * 60;
+const REGRESSION_SYMBOLS = [...WATCHLIST, 'ANET'];
 
 type RawBar = IntradayBar & { epoch: number };
 type DailyBar = { date: string; close: number };
@@ -15,6 +16,9 @@ type DailyBar = { date: string; close: number };
 const epoch = (s: string) => Math.floor(new Date(`${s}T00:00:00Z`).getTime() / 1000);
 const mean = (xs: number[]) => xs.length ? xs.reduce((a,b)=>a+b,0) / xs.length : 0;
 const ma = (xs: number[], n: number) => xs.length >= n ? mean(xs.slice(-n)) : null;
+const profileFor = (symbol:string):TradingProfile => symbol === 'ANET'
+  ? { ...getTradingProfile(symbol), family:'HARDWARE', label:'Networking / AI Infrastructure regression proxy', benchmark:'XLK', secondaryBenchmark:'QQQ', minStopAtr:.65 }
+  : getTradingProfile(symbol);
 
 function nyParts(ms: number) {
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -80,15 +84,15 @@ function marketMode(spy:DailyBar[], qqq:DailyBar[], date:string): 'RISK_ON'|'NEU
 
 await fs.mkdir('backtest-output-v6-regression',{recursive:true});
 const [spyDaily,qqqDaily]=await Promise.all([yahooDaily('SPY'),yahooDaily('QQQ')]);
-const benchSymbols=[...new Set(WATCHLIST.map(s=>getTradingProfile(s).benchmark))];
+const benchSymbols=[...new Set(REGRESSION_SYMBOLS.map(s=>profileFor(s).benchmark))];
 const benchMaps=new Map<string,Map<string,RawBar[]>>();
 for(const b of benchSymbols) {
   try { benchMaps.set(b,group(await yahoo5m(b))); } catch(e) { console.warn('benchmark skip',b,e); }
 }
 
 const events:any[]=[]; const candidateDays:any[]=[]; const skipped:any[]=[];
-for(const symbol of WATCHLIST) {
-  const profile=getTradingProfile(symbol); const benchMap=benchMaps.get(profile.benchmark); if(!benchMap){skipped.push({symbol,reason:'benchmark unavailable'});continue;}
+for(const symbol of REGRESSION_SYMBOLS) {
+  const profile=profileFor(symbol); const benchMap=benchMaps.get(profile.benchmark); if(!benchMap){skipped.push({symbol,reason:'benchmark unavailable'});continue;}
   try {
     const [bars,daily]=await Promise.all([yahoo5m(symbol),yahooDaily(symbol)]); const map=group(bars); const dates=[...map.keys()].sort();
     for(let di=1;di<dates.length;di++) {
@@ -112,7 +116,8 @@ for(const symbol of WATCHLIST) {
         const input:DayTradeDecisionInput={metrics:m,dailyBias:bias,marketMode:market,accountSizeUsd:100000,riskPerTradePct:.5,dailyMaxLossPct:1.5,realizedPnlUsd:0,maxAllocationPct:25,bid:null,ask:null,hasCatalyst:false};
         const decision=buildProfiledDayTradeDecision(input,profile);
         if(decision.label.includes('EVENT REVERSAL')) {
-          event={symbol,date,time:bar.time,gapPct:m.gapPct,rvol:m.rvol,rs:m.relativeStrengthPct,longScore:decision.longScore,shortScore:decision.shortScore,entry:decision.entry,stop:decision.stop,target1:decision.target1,target2:decision.target2,suggestedRiskUsd:decision.suggestedRiskUsd,market,bias,benchmark:profile.benchmark};
+          const stopPct=decision.entry&&decision.stop?Math.abs(decision.stop-decision.entry)/decision.entry*100:null;
+          event={symbol,date,time:bar.time,gapPct:m.gapPct,rvol:m.rvol,rs:m.relativeStrengthPct,longScore:decision.longScore,shortScore:decision.shortScore,entry:decision.entry,stop:decision.stop,stopPct,target1:decision.target1,target2:decision.target2,suggestedRiskUsd:decision.suggestedRiskUsd,market,bias,benchmark:profile.benchmark};
           break;
         }
       }
@@ -122,17 +127,20 @@ for(const symbol of WATCHLIST) {
 }
 
 const orcl=events.find(x=>x.symbol==='ORCL'&&x.date==='2026-09-11');
+const anet=events.find(x=>x.symbol==='ANET'&&x.date==='2026-08-05');
 const assertions={
   orclSep11Detected:Boolean(orcl),
   orclNotBefore1015:Boolean(orcl && orcl.time>='10:15'),
+  anetAug05Filtered:!anet,
   allEventsRespectGap:events.every(x=>(x.gapPct??0)>=5),
   allEventsRespectRvol:events.every(x=>(x.rvol??0)>=2),
   allEventsRespectRs:events.every(x=>(x.rs??0)<=-2),
+  allEventsRespectStopWidth:events.every(x=>(x.stopPct??Infinity)<=EVENT_SHORT_RULE.maxUnderlyingStopPct+1e-9),
   allEventRiskHalf:events.every(x=>(x.suggestedRiskUsd??Infinity)<=250.01),
 };
 const pass=Object.values(assertions).every(Boolean);
-const result={range:{from:FROM,to:TO},watchlist:WATCHLIST,benchmarks:benchSymbols,candidateDays:candidateDays.length,eventCount:events.length,events,assertions,pass,skipped};
+const result={range:{from:FROM,to:TO},symbols:REGRESSION_SYMBOLS,benchmarks:benchSymbols,candidateDays:candidateDays.length,eventCount:events.length,events,assertions,pass,skipped};
 await fs.writeFile('backtest-output-v6-regression/result.json',JSON.stringify(result,null,2));
-await fs.writeFile('backtest-output-v6-regression/events.csv',['symbol,date,time,gapPct,rvol,rs,longScore,shortScore,entry,stop,target1,target2,riskUsd',...events.map(x=>[x.symbol,x.date,x.time,x.gapPct,x.rvol,x.rs,x.longScore,x.shortScore,x.entry,x.stop,x.target1,x.target2,x.suggestedRiskUsd].join(','))].join('\n'));
+await fs.writeFile('backtest-output-v6-regression/events.csv',['symbol,date,time,gapPct,rvol,rs,longScore,shortScore,entry,stop,stopPct,target1,target2,riskUsd',...events.map(x=>[x.symbol,x.date,x.time,x.gapPct,x.rvol,x.rs,x.longScore,x.shortScore,x.entry,x.stop,x.stopPct,x.target1,x.target2,x.suggestedRiskUsd].join(','))].join('\n'));
 console.log(JSON.stringify(result,null,2));
 if(!pass) process.exit(1);
