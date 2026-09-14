@@ -6,6 +6,7 @@ on:
     paths:
       - 'scripts/backtest-nvda.mjs'
       - 'scripts/backtest-v3.mjs'
+      - 'scripts/optimize-expectancy.mjs'
       - '.github/workflows/backtest-nvda.yml'
 
 permissions:
@@ -37,6 +38,9 @@ jobs:
           node /tmp/backtest-v3-0945.mjs
           mv backtest-output-v3 backtest-output-v3-0945
 
+      - name: Run train-validation expectancy optimizer
+        run: node scripts/optimize-expectancy.mjs
+
       - name: Upload baseline results
         uses: actions/upload-artifact@v4
         with:
@@ -56,4 +60,11 @@ jobs:
         with:
           name: strategy-v3-0945
           path: backtest-output-v3-0945/
+          retention-days: 30
+
+      - name: Upload expectancy optimization
+        uses: actions/upload-artifact@v4
+        with:
+          name: expectancy-optimization
+          path: backtest-output-optimize/
           retention-days: 30
