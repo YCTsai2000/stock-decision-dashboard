@@ -42,18 +42,26 @@ interface AlpacaStreamOptions {
   onSnapshot: (snapshot: AlpacaLiveSnapshot) => void;
 }
 
+interface AlpacaMultiStreamOptions {
+  symbols: string[];
+  credentials: AlpacaCredentials;
+  onStatus: (status: AlpacaStreamStatus, message?: string) => void;
+  onSnapshot: (snapshot: AlpacaLiveSnapshot) => void;
+}
+
 const STREAM_URL = 'wss://stream.data.alpaca.markets/v2/iex';
 const RECONNECT_MS = 3000;
 
-export const connectAlpacaIex = ({ symbol, credentials, onStatus, onSnapshot }: AlpacaStreamOptions) => {
-  const upper = symbol.trim().toUpperCase();
+export const connectAlpacaIexMulti = ({ symbols, credentials, onStatus, onSnapshot }: AlpacaMultiStreamOptions) => {
+  const uppers = [...new Set(symbols.map(s => s.trim().toUpperCase()).filter(Boolean))];
+  const subscribed = new Set(uppers);
   const keyId = credentials.keyId.trim();
   const secret = credentials.secret.trim();
   let socket: WebSocket | null = null;
   let reconnectTimer: number | null = null;
   let closedByUser = false;
   let fatalError = false;
-  let latest: AlpacaLiveSnapshot = { ...EMPTY_ALPACA_SNAPSHOT, symbol: upper };
+  const latest = new Map<string, AlpacaLiveSnapshot>(uppers.map(symbol => [symbol, { ...EMPTY_ALPACA_SNAPSHOT, symbol }]));
 
   const clearReconnect = () => {
     if (reconnectTimer !== null) {
@@ -74,14 +82,13 @@ export const connectAlpacaIex = ({ symbol, credentials, onStatus, onSnapshot }: 
 
   const start = () => {
     clearReconnect();
-    if (!upper || !keyId || !secret) {
+    if (!uppers.length || !keyId || !secret) {
       onStatus('disabled', '尚未設定 Alpaca Key ID / Secret');
       return;
     }
 
     onStatus('connecting', '連線 Alpaca IEX WebSocket…');
     socket = new WebSocket(STREAM_URL);
-
     socket.onopen = () => onStatus('authenticating', 'WebSocket 已連線，等待認證…');
 
     socket.onmessage = event => {
@@ -99,11 +106,11 @@ export const connectAlpacaIex = ({ symbol, credentials, onStatus, onSnapshot }: 
           continue;
         }
         if (msg?.T === 'success' && msg?.msg === 'authenticated') {
-          send({ action: 'subscribe', trades: [upper], quotes: [upper] });
+          send({ action: 'subscribe', trades: uppers, quotes: uppers });
           continue;
         }
         if (msg?.T === 'subscription') {
-          onStatus('connected', `Alpaca IEX 即時串流：${upper}`);
+          onStatus('connected', `Alpaca IEX 即時串流：${uppers.join(' / ')}`);
           continue;
         }
         if (msg?.T === 'error') {
@@ -116,40 +123,44 @@ export const connectAlpacaIex = ({ symbol, credentials, onStatus, onSnapshot }: 
           }
           continue;
         }
-        if (msg?.S !== upper) continue;
+
+        const symbol = String(msg?.S ?? '').toUpperCase();
+        if (!subscribed.has(symbol)) continue;
+        const current = latest.get(symbol) ?? { ...EMPTY_ALPACA_SNAPSHOT, symbol };
 
         if (msg?.T === 't') {
-          latest = {
-            ...latest,
-            tradePrice: Number.isFinite(Number(msg.p)) ? Number(msg.p) : latest.tradePrice,
-            tradeSize: Number.isFinite(Number(msg.s)) ? Number(msg.s) : latest.tradeSize,
-            exchangeTrade: msg.x ?? latest.exchangeTrade,
-            marketTimestamp: msg.t ?? latest.marketTimestamp,
+          const next: AlpacaLiveSnapshot = {
+            ...current,
+            tradePrice: Number.isFinite(Number(msg.p)) ? Number(msg.p) : current.tradePrice,
+            tradeSize: Number.isFinite(Number(msg.s)) ? Number(msg.s) : current.tradeSize,
+            exchangeTrade: msg.x ?? current.exchangeTrade,
+            marketTimestamp: msg.t ?? current.marketTimestamp,
             receivedAt: Date.now(),
           };
-          onSnapshot(latest);
+          latest.set(symbol, next);
+          onSnapshot(next);
           continue;
         }
 
         if (msg?.T === 'q') {
-          latest = {
-            ...latest,
-            bid: Number.isFinite(Number(msg.bp)) && Number(msg.bp) > 0 ? Number(msg.bp) : latest.bid,
-            ask: Number.isFinite(Number(msg.ap)) && Number(msg.ap) > 0 ? Number(msg.ap) : latest.ask,
-            bidSize: Number.isFinite(Number(msg.bs)) ? Number(msg.bs) : latest.bidSize,
-            askSize: Number.isFinite(Number(msg.as)) ? Number(msg.as) : latest.askSize,
-            exchangeBid: msg.bx ?? latest.exchangeBid,
-            exchangeAsk: msg.ax ?? latest.exchangeAsk,
-            marketTimestamp: msg.t ?? latest.marketTimestamp,
+          const next: AlpacaLiveSnapshot = {
+            ...current,
+            bid: Number.isFinite(Number(msg.bp)) && Number(msg.bp) > 0 ? Number(msg.bp) : current.bid,
+            ask: Number.isFinite(Number(msg.ap)) && Number(msg.ap) > 0 ? Number(msg.ap) : current.ask,
+            bidSize: Number.isFinite(Number(msg.bs)) ? Number(msg.bs) : current.bidSize,
+            askSize: Number.isFinite(Number(msg.as)) ? Number(msg.as) : current.askSize,
+            exchangeBid: msg.bx ?? current.exchangeBid,
+            exchangeAsk: msg.ax ?? current.exchangeAsk,
+            marketTimestamp: msg.t ?? current.marketTimestamp,
             receivedAt: Date.now(),
           };
-          onSnapshot(latest);
+          latest.set(symbol, next);
+          onSnapshot(next);
         }
       }
     };
 
     socket.onerror = () => onStatus('error', 'Alpaca WebSocket 發生連線錯誤');
-
     socket.onclose = () => {
       socket = null;
       if (closedByUser) {
@@ -163,7 +174,6 @@ export const connectAlpacaIex = ({ symbol, credentials, onStatus, onSnapshot }: 
   };
 
   start();
-
   return () => {
     closedByUser = true;
     clearReconnect();
@@ -171,3 +181,10 @@ export const connectAlpacaIex = ({ symbol, credentials, onStatus, onSnapshot }: 
     socket = null;
   };
 };
+
+export const connectAlpacaIex = ({ symbol, credentials, onStatus, onSnapshot }: AlpacaStreamOptions) => connectAlpacaIexMulti({
+  symbols: [symbol],
+  credentials,
+  onStatus,
+  onSnapshot,
+});
