@@ -8,6 +8,7 @@ export const EVENT_SHORT_RULE = {
   maxRelativeStrengthPct: -2,
   minShortScore: 80,
   minScoreLead: 15,
+  maxBreakdownAgeMin: 5,
   maxUnderlyingStopPct: 1.5,
   riskFactor: 0.5,
 } as const;
@@ -19,6 +20,14 @@ type EventShortLevels = {
   stopPct: number;
   target1: number;
   target2: number;
+};
+
+const calculateBreakdownAgeMin = (input: DayTradeDecisionInput): number | null => {
+  const m = input.metrics;
+  if (m.latestMinute === null || m.orLow === null) return null;
+  const firstBreak = m.sessionBars.find(bar => bar.minute >= 9 * 60 + 45 && bar.close < m.orLow!);
+  if (!firstBreak) return null;
+  return Math.max(0, m.latestMinute - firstBreak.minute);
 };
 
 const calculateEventShortLevels = (
@@ -56,6 +65,7 @@ export const isEventShortOverride = (
   const m = input.metrics;
   const price = m.currentPrice;
   const levels = calculateEventShortLevels(input, profile);
+  const breakdownAgeMin = calculateBreakdownAgeMin(input);
   return base.hardBlock === null
     && input.dailyBias === 'LONG'
     && input.marketMode !== 'RISK_ON'
@@ -67,6 +77,7 @@ export const isEventShortOverride = (
     && m.benchmarkAboveVwap === false
     && m.relativeStrengthPct !== null && m.relativeStrengthPct <= EVENT_SHORT_RULE.maxRelativeStrengthPct
     && m.orReady && m.orLow !== null && price < m.orLow
+    && breakdownAgeMin !== null && breakdownAgeMin <= EVENT_SHORT_RULE.maxBreakdownAgeMin
     && base.shortScore >= EVENT_SHORT_RULE.minShortScore
     && base.shortScore - base.longScore >= EVENT_SHORT_RULE.minScoreLead
     && levels !== null && levels.stopPct <= EVENT_SHORT_RULE.maxUnderlyingStopPct;
@@ -79,6 +90,7 @@ const buildEventShortDecision = (
 ): DayTradeDecision => {
   const m = input.metrics;
   const levels = calculateEventShortLevels(input, profile)!;
+  const breakdownAgeMin = calculateBreakdownAgeMin(input) ?? 0;
   const { entry, stop, riskPerShare, stopPct, target1, target2 } = levels;
   const baseRiskBudget = input.accountSizeUsd * (input.riskPerTradePct / 100) * EVENT_SHORT_RULE.riskFactor;
   const timeAdjustedBudget = baseRiskBudget * base.phaseFactor;
@@ -91,7 +103,7 @@ const buildEventShortDecision = (
     ...base,
     direction: 'SHORT',
     label: 'SHORT · EVENT REVERSAL',
-    reason: `V6 事件反轉：Gap ${m.gapPct?.toFixed(2)}%、RVOL ${m.rvol?.toFixed(2)}x、RS ${m.relativeStrengthPct?.toFixed(2)}%，且跌破 OR15 Low / VWAP、Benchmark 同步轉弱；原型股技術 Stop ${stopPct.toFixed(2)}% ≤ ${EVENT_SHORT_RULE.maxUnderlyingStopPct.toFixed(1)}%。Daily LONG 僅在此極端條件下被覆寫，事件單使用一般風險的 50%。`,
+    reason: `V6 事件反轉：Gap ${m.gapPct?.toFixed(2)}%、RVOL ${m.rvol?.toFixed(2)}x、RS ${m.relativeStrengthPct?.toFixed(2)}%；OR15 Low 為新鮮跌破（Age ${breakdownAgeMin}m ≤ ${EVENT_SHORT_RULE.maxBreakdownAgeMin}m），且 VWAP / Benchmark 同步轉弱；原型股技術 Stop ${stopPct.toFixed(2)}% ≤ ${EVENT_SHORT_RULE.maxUnderlyingStopPct.toFixed(1)}%。Daily LONG 僅在此極端條件下被覆寫，事件單使用一般風險的 50%。`,
     entry,
     stop,
     target1,
