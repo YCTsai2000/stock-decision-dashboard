@@ -7,19 +7,20 @@ import type { ApiKeys, HistoricalDataResult } from './types';
 import { calculateMA, evaluateMarketRegime } from './analysis';
 import { fetchHistoricalData } from './dataLayer';
 import {
-  buildDayTradeDecision, computeIntradayMetrics, fetchIntradayData, getNewYorkClock, getSessionPhase,
+  computeIntradayMetrics, fetchIntradayData, getNewYorkClock, getSessionPhase,
   type DayTradeDecisionInput, type IntradayFetchResult, type SessionPhase,
 } from './intraday';
+import { buildProfiledDayTradeDecision } from './decisionV6';
 import {
   connectAlpacaIexMulti, EMPTY_ALPACA_SNAPSHOT,
   type AlpacaCredentials, type AlpacaLiveSnapshot, type AlpacaStreamStatus,
 } from './alpacaStream';
-import { applyTradingProfile, getTradingProfile, WATCHLIST } from './tradingProfiles';
+import { getTradingProfile, WATCHLIST } from './tradingProfiles';
 import {
   getAllExecutionTickers, getExecutionForDirection, getTradingInstrument,
   type LeveragedExecution,
 } from './tradingInstruments';
-import WatchlistRanker from './WatchlistRanker';
+import WatchlistRanker from './WatchlistRankerV6';
 
 const EMPTY_KEYS: ApiKeys = { massive: '', finnhub: '', fmp: '', twelve: '', fred: '' };
 const REFRESH_MS = 180_000;
@@ -193,7 +194,7 @@ export default function DayTradingAppV5() {
     dailyMaxLossPct: 1.5, realizedPnlUsd: 0,
     maxAllocationPct: maxAlloc, bid: null, ask: null, hasCatalyst: false,
   }), [metrics, bias, market.mode, account, riskPct, maxAlloc]);
-  const decision = useMemo(() => applyTradingProfile(decisionInput, buildDayTradeDecision(decisionInput), profile), [decisionInput, profile]);
+  const decision = useMemo(() => buildProfiledDayTradeDecision(decisionInput, profile), [decisionInput, profile]);
   const execution = getExecutionForDirection(active, decision.direction);
   const executionLive = execution?.side === 'LONG' ? bullLive : execution?.side === 'SHORT' ? bearLive : { ...EMPTY_ALPACA_SNAPSHOT };
   const executionPrice = executionLive.tradePrice ?? (executionLive.bid && executionLive.ask ? (executionLive.bid + executionLive.ask) / 2 : null);
@@ -202,7 +203,8 @@ export default function DayTradingAppV5() {
 
   const stopPct = decision.entry && decision.stop ? Math.abs(decision.entry - decision.stop) / decision.entry : null;
   const etfRiskPerShare = executionPrice && stopPct && execution ? executionPrice * stopPct * Math.abs(execution.leverage) : null;
-  const sharesRisk = etfRiskPerShare ? Math.floor((account * riskPct / 100) / etfRiskPerShare) : 0;
+  const eventRiskFactor = decision.label.includes('EVENT REVERSAL') ? 0.5 : 1;
+  const sharesRisk = etfRiskPerShare ? Math.floor((account * riskPct / 100 * eventRiskFactor) / etfRiskPerShare) : 0;
   const sharesAlloc = executionPrice ? Math.floor((account * maxAlloc / 100) / executionPrice) : 0;
   const shares = executionAllowed ? Math.max(0, Math.min(sharesRisk, sharesAlloc)) : 0;
 
