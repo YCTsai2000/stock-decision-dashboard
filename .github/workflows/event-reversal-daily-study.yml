@@ -1,0 +1,30 @@
+name: Event reversal daily study
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'scripts/event-reversal-daily-study.mjs'
+      - '.github/workflows/event-reversal-daily-study.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  study:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Run multi-year daily event study
+        run: node scripts/event-reversal-daily-study.mjs
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: event-reversal-daily-study
+          path: backtest-output-event-daily/
+          if-no-files-found: warn
+          retention-days: 30
