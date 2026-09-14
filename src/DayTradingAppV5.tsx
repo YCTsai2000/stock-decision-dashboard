@@ -204,7 +204,7 @@ export default function DayTradingAppV5() {
   const stopPct = decision.entry && decision.stop ? Math.abs(decision.entry - decision.stop) / decision.entry : null;
   const etfRiskPerShare = executionPrice && stopPct && execution ? executionPrice * stopPct * Math.abs(execution.leverage) : null;
   const executionRiskFactor = decisionRiskFactor(decision);
-  const sharesRisk = etfRiskPerShare ? Math.floor((account * riskPct / 100 * executionRiskFactor) / etfRiskPerShare) : 0;
+  const sharesRisk = etfRiskPerShare ? Math.floor((account * riskPct / 100 * executionRiskFactor * decision.phaseFactor) / etfRiskPerShare) : 0;
   const sharesAlloc = executionPrice ? Math.floor((account * maxAlloc / 100) / executionPrice) : 0;
   const shares = executionAllowed ? Math.max(0, Math.min(sharesRisk, sharesAlloc)) : 0;
 
