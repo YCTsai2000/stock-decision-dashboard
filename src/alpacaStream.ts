@@ -52,6 +52,7 @@ export const connectAlpacaIex = ({ symbol, credentials, onStatus, onSnapshot }: 
   let socket: WebSocket | null = null;
   let reconnectTimer: number | null = null;
   let closedByUser = false;
+  let fatalError = false;
   let latest: AlpacaLiveSnapshot = { ...EMPTY_ALPACA_SNAPSHOT, symbol: upper };
 
   const clearReconnect = () => {
@@ -67,7 +68,7 @@ export const connectAlpacaIex = ({ symbol, credentials, onStatus, onSnapshot }: 
 
   const scheduleReconnect = () => {
     clearReconnect();
-    if (closedByUser) return;
+    if (closedByUser || fatalError) return;
     reconnectTimer = window.setTimeout(() => start(), RECONNECT_MS);
   };
 
@@ -106,7 +107,13 @@ export const connectAlpacaIex = ({ symbol, credentials, onStatus, onSnapshot }: 
           continue;
         }
         if (msg?.T === 'error') {
-          onStatus('error', `Alpaca ${msg?.code ?? ''}: ${msg?.msg ?? 'stream error'}`.trim());
+          const code = Number(msg?.code);
+          const text = `Alpaca ${msg?.code ?? ''}: ${msg?.msg ?? 'stream error'}`.trim();
+          onStatus('error', text);
+          if ([402, 406, 409].includes(code)) {
+            fatalError = true;
+            socket?.close();
+          }
           continue;
         }
         if (msg?.S !== upper) continue;
@@ -149,6 +156,7 @@ export const connectAlpacaIex = ({ symbol, credentials, onStatus, onSnapshot }: 
         onStatus('disconnected', 'Alpaca WebSocket 已關閉');
         return;
       }
+      if (fatalError) return;
       onStatus('disconnected', 'Alpaca WebSocket 中斷，3 秒後自動重連');
       scheduleReconnect();
     };
