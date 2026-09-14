@@ -1,0 +1,36 @@
+name: V6 convergence regression
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'src/decisionV6.ts'
+      - 'src/WatchlistRankerV6.tsx'
+      - 'src/tradingProfiles.ts'
+      - 'scripts/regression-v6-events.ts'
+      - '.github/workflows/regression-v6.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm ci
+      - name: Run V6 event convergence regression
+        run: npx --yes tsx scripts/regression-v6-events.ts
+      - name: Upload regression results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v6-convergence-regression
+          path: backtest-output-v6-regression/
+          retention-days: 30
