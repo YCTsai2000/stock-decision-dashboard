@@ -26,8 +26,16 @@ jobs:
       - name: Run NVDA baseline backtest
         run: node scripts/backtest-nvda.mjs
 
-      - name: Run v3 A/B cross-sectional backtest
-        run: node scripts/backtest-v3.mjs
+      - name: Run v3 with 10:00 cutoff
+        run: |
+          node scripts/backtest-v3.mjs
+          mv backtest-output-v3 backtest-output-v3-1000
+
+      - name: Run v3 with 09:45 cutoff
+        run: |
+          sed 's/const OPEN=570,CLOSE=960,OR_END=585,V3_START=600/const OPEN=570,CLOSE=960,OR_END=585,V3_START=585/' scripts/backtest-v3.mjs > /tmp/backtest-v3-0945.mjs
+          node /tmp/backtest-v3-0945.mjs
+          mv backtest-output-v3 backtest-output-v3-0945
 
       - name: Upload baseline results
         uses: actions/upload-artifact@v4
@@ -36,9 +44,16 @@ jobs:
           path: backtest-output/
           retention-days: 30
 
-      - name: Upload v3 comparison results
+      - name: Upload v3 10:00 results
         uses: actions/upload-artifact@v4
         with:
-          name: strategy-v3-comparison
-          path: backtest-output-v3/
+          name: strategy-v3-1000
+          path: backtest-output-v3-1000/
+          retention-days: 30
+
+      - name: Upload v3 09:45 results
+        uses: actions/upload-artifact@v4
+        with:
+          name: strategy-v3-0945
+          path: backtest-output-v3-0945/
           retention-days: 30
