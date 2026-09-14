@@ -13,6 +13,12 @@ export const EVENT_SHORT_RULE = {
   riskFactor: 0.5,
 } as const;
 
+export const decisionRiskFactor = (decision: DayTradeDecision): number => {
+  if (decision.label.includes('EVENT REVERSAL')) return 0.5;
+  if (decision.label.includes('LONG · A Profile')) return 0.5;
+  return 1;
+};
+
 type EventShortLevels = {
   entry: number;
   stop: number;
@@ -103,7 +109,7 @@ const buildEventShortDecision = (
     ...base,
     direction: 'SHORT',
     label: 'SHORT · EVENT REVERSAL',
-    reason: `V6.1 事件反轉：Gap ${m.gapPct?.toFixed(2)}%、RVOL ${m.rvol?.toFixed(2)}x、RS ${m.relativeStrengthPct?.toFixed(2)}%；OR15 Low 為新鮮跌破（Age ${breakdownAgeMin}m ≤ ${EVENT_SHORT_RULE.maxBreakdownAgeMin}m），且 VWAP / Benchmark 同步轉弱；原型股技術 Stop ${stopPct.toFixed(2)}% ≤ ${EVENT_SHORT_RULE.maxUnderlyingStopPct.toFixed(1)}%。Daily LONG 僅在此極端條件下被覆寫，事件單使用一般風險的 50%。`,
+    reason: `V6.2 事件反轉：Gap ${m.gapPct?.toFixed(2)}%、RVOL ${m.rvol?.toFixed(2)}x、RS ${m.relativeStrengthPct?.toFixed(2)}%；OR15 Low 為新鮮跌破（Age ${breakdownAgeMin}m ≤ ${EVENT_SHORT_RULE.maxBreakdownAgeMin}m），且 VWAP / Benchmark 同步轉弱；原型股技術 Stop ${stopPct.toFixed(2)}% ≤ ${EVENT_SHORT_RULE.maxUnderlyingStopPct.toFixed(1)}%。Daily LONG 僅在此極端條件下被覆寫，事件單使用一般風險的 50%。`,
     entry,
     stop,
     target1,
@@ -118,7 +124,7 @@ const pauseNormalShort = (decision: DayTradeDecision): DayTradeDecision => ({
   ...decision,
   direction: 'WAIT',
   label: 'WATCH · NORMAL SHORT RESEARCH',
-  reason: `V6.1：一般 Short 子模型在目前整體回測仍為負期望，因此暫停實際進場並保留觀察訊號；只有嚴格 Event Reversal Short 可以進場。原訊號：${decision.reason}`,
+  reason: `V6.2：一般 Short 子模型在目前整體回測仍為負期望，因此暫停實際進場並保留觀察訊號；只有嚴格 Event Reversal Short 可以進場。原訊號：${decision.reason}`,
   entry: null,
   stop: null,
   target1: null,
@@ -128,6 +134,17 @@ const pauseNormalShort = (decision: DayTradeDecision): DayTradeDecision => ({
   suggestedRiskUsd: 0,
 });
 
+const dampNormalA = (decision: DayTradeDecision): DayTradeDecision => {
+  if (!decision.label.includes('LONG · A Profile')) return decision;
+  const shares = Math.floor(decision.suggestedShares * 0.5);
+  return {
+    ...decision,
+    reason: `${decision.reason} V6.2 風險阻尼：普通 A setup 僅使用 A+ 的 50% 風險，持續累積樣本。`,
+    suggestedShares: shares,
+    suggestedRiskUsd: decision.riskPerShare ? shares * decision.riskPerShare : 0,
+  };
+};
+
 export const buildProfiledDayTradeDecision = (
   input: DayTradeDecisionInput,
   profile: TradingProfile,
@@ -135,7 +152,7 @@ export const buildProfiledDayTradeDecision = (
   const base = buildDayTradeDecision(input);
   const normal = applyTradingProfile(input, base, profile);
   if (normal.hardBlock) return normal;
-  if (normal.direction === 'LONG') return normal;
+  if (normal.direction === 'LONG') return dampNormalA(normal);
   if (normal.direction === 'SHORT') return pauseNormalShort(normal);
   if (!isEventShortOverride(input, base, profile)) return normal;
   return buildEventShortDecision(input, base, profile);
