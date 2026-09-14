@@ -1,0 +1,30 @@
+name: Event reversal extreme V6
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'scripts/event-reversal-extreme-v6.mjs'
+      - '.github/workflows/event-reversal-extreme-v6.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  study:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Run fresh-universe extreme validation
+        run: node scripts/event-reversal-extreme-v6.mjs
+      - name: Upload V6 results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: event-reversal-extreme-v6
+          path: backtest-output-event-extreme-v6/
+          if-no-files-found: warn
+          retention-days: 30
