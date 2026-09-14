@@ -421,63 +421,69 @@ export const buildDayTradeDecision = (input: DayTradeDecisionInput): DayTradeDec
   const brokeOrHigh = m.orReady && m.orHigh !== null ? price > m.orHigh : false;
   const brokeOrLow = m.orReady && m.orLow !== null ? price < m.orLow : false;
   const nearVwap = m.vwap !== null ? Math.abs(price - m.vwap) <= atr * 0.35 : false;
+  const rvol = m.rvol ?? 0;
+  const rs = m.relativeStrengthPct;
 
+  // v3：Long / Short 不再鏡像對稱。分數負責排序，關鍵結構改成 hard filters。
   let longScore = 0;
   let shortScore = 0;
 
-  // 1) 日線與大盤背景：20 分
+  // 日線背景：空單在 NEUTRAL 時權重較低，避免長期強勢股被輕易判為可放空。
   longScore += input.dailyBias === 'LONG' ? 10 : input.dailyBias === 'NEUTRAL' ? 5 : 0;
-  shortScore += input.dailyBias === 'SHORT' ? 10 : input.dailyBias === 'NEUTRAL' ? 5 : 0;
-  longScore += input.marketMode === 'RISK_ON' ? 10 : input.marketMode === 'NEUTRAL' ? 5 : 0;
-  shortScore += input.marketMode === 'RISK_OFF' ? 10 : input.marketMode === 'NEUTRAL' ? 5 : 0;
+  shortScore += input.dailyBias === 'SHORT' ? 10 : input.dailyBias === 'NEUTRAL' ? 3 : 0;
 
-  // 2) Benchmark 同步：10 分
-  if (m.benchmarkAboveVwap === true) longScore += 10;
-  if (m.benchmarkAboveVwap === false) shortScore += 10;
+  // 大盤背景：Risk-On 強化多方；Risk-Off 強化空方。
+  longScore += input.marketMode === 'RISK_ON' ? 15 : input.marketMode === 'NEUTRAL' ? 8 : 0;
+  shortScore += input.marketMode === 'RISK_OFF' ? 15 : input.marketMode === 'NEUTRAL' ? 5 : 0;
 
-  // 3) VWAP 結構：20 分
+  // Benchmark 同步。
+  if (m.benchmarkAboveVwap === true) longScore += 15;
+  if (m.benchmarkAboveVwap === false) shortScore += 15;
+
+  // VWAP 結構。
   if (aboveVwap) longScore += 12;
   if (belowVwap) shortScore += 12;
   if (m.vwapSlopeUp === true) longScore += 8;
   if (m.vwapSlopeUp === false) shortScore += 8;
 
-  // 4) OR15 / VWAP pullback：15 分
-  if (brokeOrHigh) longScore += 15;
-  else if (aboveVwap && nearVwap) longScore += 10;
-  if (brokeOrLow) shortScore += 15;
-  else if (belowVwap && nearVwap) shortScore += 10;
+  // Setup：多單接受 OR15 突破或 VWAP 附近順勢回踩；空單只接受 OR15 Low 真正跌破。
+  if (brokeOrHigh) longScore += 20;
+  else if (aboveVwap && nearVwap) longScore += 12;
+  if (brokeOrLow) shortScore += 20;
 
-  // 5) Intraday RVOL：15 分
-  const rvol = m.rvol ?? 0;
-  const volumePoints = rvol >= 2 ? 15 : rvol >= 1.5 ? 12 : rvol >= 1.2 ? 8 : rvol >= 1 ? 4 : 0;
+  // RVOL 降低權重，避免單純高量把壞結構補成高分。
+  const volumePoints = rvol >= 2 ? 10 : rvol >= 1.5 ? 8 : rvol >= 1.2 ? 6 : rvol >= 1 ? 3 : 0;
   longScore += volumePoints;
   shortScore += volumePoints;
 
-  // 6) 盤中相對強弱：10 分
-  const rs = m.relativeStrengthPct;
+  // 相對強弱：方向必須與 benchmark 的相對表現一致。
   if (rs !== null) {
-    if (rs >= 0.5) longScore += 10; else if (rs >= 0.2) longScore += 7; else if (rs > 0) longScore += 3;
-    if (rs <= -0.5) shortScore += 10; else if (rs <= -0.2) shortScore += 7; else if (rs < 0) shortScore += 3;
+    if (rs >= 0.5) longScore += 10; else if (rs >= 0.2) longScore += 7; else if (rs > 0) longScore += 4;
+    if (rs <= -0.5) shortScore += 10; else if (rs <= -0.2) shortScore += 7; else if (rs < 0) shortScore += 4;
   }
 
-  // 7) 流動性：5 分（無 bid/ask 時給中性 2 分）
-  if (spreadPct === null) { longScore += 2; shortScore += 2; }
-  else if (spreadPct <= 0.15) { longScore += 5; shortScore += 5; }
-  else if (spreadPct <= 0.30) { longScore += 3; shortScore += 3; }
-
-  // 8) 時段品質：5 分
-  const timePoints = pf >= 1 ? 5 : pf >= 0.6 ? 3 : pf > 0 ? 1 : 0;
-  longScore += timePoints;
-  shortScore += timePoints;
-
-  // Catalyst 不拿來彌補壞的價格結構，只做顯示與同分優先。
   longScore = clamp(longScore, 0, 100);
   shortScore = clamp(shortScore, 0, 100);
 
+  const longStructureReady = input.marketMode !== 'RISK_OFF'
+    && aboveVwap
+    && m.vwapSlopeUp === true
+    && m.benchmarkAboveVwap === true
+    && rs !== null && rs > 0
+    && (brokeOrHigh || (aboveVwap && nearVwap));
+
+  const shortStructureReady = input.dailyBias !== 'LONG'
+    && input.marketMode !== 'RISK_ON'
+    && belowVwap
+    && m.vwapSlopeUp === false
+    && m.benchmarkAboveVwap === false
+    && rs !== null && rs < 0
+    && brokeOrLow;
+
   let direction: DayTradeDirection = 'WAIT';
   if (!hardBlock) {
-    if (longScore >= 80 && longScore - shortScore >= 15) direction = 'LONG';
-    else if (shortScore >= 80 && shortScore - longScore >= 15) direction = 'SHORT';
+    if (longStructureReady && longScore >= 80 && longScore - shortScore >= 15) direction = 'LONG';
+    else if (shortStructureReady && shortScore >= 80 && shortScore - longScore >= 15) direction = 'SHORT';
   }
 
   let label = '等待';
@@ -487,13 +493,23 @@ export const buildDayTradeDecision = (input: DayTradeDecisionInput): DayTradeDec
     reason = hardBlock;
   } else if (direction === 'LONG') {
     label = 'LONG 候選';
-    reason = brokeOrHigh ? '價格站上 VWAP 並突破 OR15，高分多方結構。' : '多方背景成立，價格在 VWAP 附近形成順勢回踩。';
+    reason = brokeOrHigh
+      ? '多方 hard filters 全數成立：股價/VWAP/Benchmark/RS 同向，且突破 OR15。'
+      : '多方 hard filters 全數成立：股價與 Benchmark 同步偏強，VWAP 附近順勢回踩。';
   } else if (direction === 'SHORT') {
     label = 'SHORT 候選';
-    reason = brokeOrLow ? '價格跌破 VWAP 並跌破 OR15，高分空方結構。' : '空方背景成立，價格在 VWAP 附近形成反彈受阻。';
+    reason = '空方 hard filters 全數成立：日線非多頭、Market 非 Risk-On、股價與 Benchmark 同步轉弱並跌破 OR15 Low。';
   } else if (Math.max(longScore, shortScore) >= 65) {
     label = 'WATCH';
-    reason = '條件接近，但方向優勢或確認程度不足，等待下一根 5 分 K。';
+    if (longScore >= shortScore) {
+      reason = longStructureReady
+        ? '多方結構已成立，但分數或方向領先幅度不足。'
+        : '多方分數接近，但 VWAP、Benchmark、RS 或 OR15/VWAP 回踩確認尚未全部成立；分數不能補掉缺失的結構。';
+    } else {
+      reason = shortStructureReady
+        ? '空方結構已成立，但分數或方向領先幅度不足。'
+        : '空方分數接近，但必須同時滿足日線非多頭、Market 非 Risk-On、VWAP 向下、Benchmark 向下、RS<0 與 OR15 Low 跌破。';
+    }
   }
 
   let entry: number | null = null;
