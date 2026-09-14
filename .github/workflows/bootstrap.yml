@@ -21,8 +21,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat .bootstrap/part* > /tmp/project.tar.gz.b64
+          cat .bootstrap/part00 .bootstrap/part01 .bootstrap/p2_0 .bootstrap/p2_1 .bootstrap/part03 .bootstrap/part04 .bootstrap/part05 > /tmp/project.tar.gz.b64
           base64 --decode /tmp/project.tar.gz.b64 > /tmp/project.tar.gz
+          tar -tzf /tmp/project.tar.gz > /tmp/archive-list.txt
           tar -xzf /tmp/project.tar.gz -C .
           rm -rf .bootstrap
           rm -f .github/workflows/bootstrap.yml
