@@ -1,0 +1,33 @@
+name: V6 persistence diagnostic
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'scripts/diagnose-v6-persistence.ts'
+      - '.github/workflows/diagnose-v6-persistence.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Run persistence diagnostic
+        run: npx --yes tsx scripts/diagnose-v6-persistence.ts
+      - name: Upload diagnostic results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v6-persistence-diagnostic
+          path: backtest-output-v6-persistence/
+          retention-days: 30
