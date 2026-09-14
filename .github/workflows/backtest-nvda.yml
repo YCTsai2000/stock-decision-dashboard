@@ -7,6 +7,7 @@ on:
       - 'scripts/backtest-nvda.mjs'
       - 'scripts/backtest-v3.mjs'
       - 'scripts/optimize-expectancy.mjs'
+      - 'scripts/robustness-v4.mjs'
       - '.github/workflows/backtest-nvda.yml'
 
 permissions:
@@ -41,6 +42,9 @@ jobs:
       - name: Run train-validation expectancy optimizer
         run: node scripts/optimize-expectancy.mjs
 
+      - name: Run v4 untouched-symbol robustness test
+        run: node scripts/robustness-v4.mjs
+
       - name: Upload baseline results
         uses: actions/upload-artifact@v4
         with:
@@ -67,4 +71,11 @@ jobs:
         with:
           name: expectancy-optimization
           path: backtest-output-optimize/
+          retention-days: 30
+
+      - name: Upload v4 robustness results
+        uses: actions/upload-artifact@v4
+        with:
+          name: strategy-v4-robustness
+          path: backtest-output-v4/
           retention-days: 30
