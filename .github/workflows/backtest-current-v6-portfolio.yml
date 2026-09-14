@@ -4,6 +4,9 @@ on:
   workflow_dispatch:
   push:
     paths:
+      - 'src/intraday.ts'
+      - 'src/tradingProfiles.ts'
+      - 'src/decisionV6.ts'
       - 'scripts/backtest-current-v6-portfolio.ts'
       - '.github/workflows/backtest-current-v6-portfolio.yml'
 
