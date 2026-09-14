@@ -1,0 +1,30 @@
+name: Event-day override optimizer
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'scripts/optimize-event-override.mjs'
+      - '.github/workflows/optimize-event-override.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  optimize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Optimize event-day override
+        run: node scripts/optimize-event-override.mjs
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: event-day-override-optimization
+          path: backtest-output-event-override/
+          retention-days: 30
