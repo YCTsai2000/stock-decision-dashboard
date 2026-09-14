@@ -1,0 +1,33 @@
+name: Event reversal robustness optimizer
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'scripts/optimize-event-reversal.mjs'
+      - '.github/workflows/optimize-event-reversal.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  optimize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run coarse-to-fine optimizer
+        run: node scripts/optimize-event-reversal.mjs
+
+      - name: Upload optimizer results
+        uses: actions/upload-artifact@v4
+        with:
+          name: event-reversal-optimizer
+          path: backtest-output-event-reversal/
+          retention-days: 30
