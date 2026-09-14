@@ -1,0 +1,33 @@
+name: V6 cross-sectional event calibration
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'scripts/calibrate-v6-event-crosssection.ts'
+      - '.github/workflows/calibrate-v6-event-crosssection.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  calibrate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Run calibration
+        run: npx --yes tsx scripts/calibrate-v6-event-crosssection.ts
+      - name: Upload calibration results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v6-crosssection-calibration
+          path: backtest-output-v6-crosssection/
+          retention-days: 30
