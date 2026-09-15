@@ -1,0 +1,34 @@
+name: Apply secure API proxy migration
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'scripts/migrate-secure-api-proxy.mjs'
+      - '.github/workflows/apply-secure-api-proxy.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Apply migration
+        run: node scripts/migrate-secure-api-proxy.mjs
+
+      - name: Commit source changes
+        run: |
+          if git diff --quiet; then
+            echo "No migration changes required"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/dataLayer.ts src/intradayCanonical.ts src/App.tsx src/DayTradingAppV5.tsx src/WatchlistRankerV6.tsx
+          git commit -m "feat: route dashboard market data through secure API proxy"
+          git push origin HEAD:main
