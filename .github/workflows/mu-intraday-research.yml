@@ -1,0 +1,51 @@
+name: MU intraday historical research
+
+on:
+  workflow_dispatch:
+    inputs:
+      start:
+        description: 'First date (YYYY-MM-DD)'
+        required: true
+        default: '2025-09-01'
+      end:
+        description: 'Last date (YYYY-MM-DD)'
+        required: true
+        default: '2026-09-15'
+
+permissions:
+  contents: read
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      MASSIVE_API_KEY: ${{ secrets.MASSIVE_API_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Verify Massive key exists
+        run: |
+          if [ -z "$MASSIVE_API_KEY" ]; then
+            echo "Repository secret MASSIVE_API_KEY is missing."
+            exit 1
+          fi
+
+      - name: Download 1-minute MU and benchmark bars
+        run: node research/mu-intraday/download.mjs --start "${{ inputs.start }}" --end "${{ inputs.end }}"
+
+      - name: Build features, labels and setup backtests
+        run: node research/mu-intraday/analyze.mjs
+
+      - name: Upload research results
+        uses: actions/upload-artifact@v4
+        with:
+          name: mu-intraday-research-${{ inputs.start }}-${{ inputs.end }}
+          path: research-output/mu-intraday/results/
+          retention-days: 30
