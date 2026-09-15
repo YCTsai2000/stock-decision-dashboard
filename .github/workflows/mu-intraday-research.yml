@@ -11,6 +11,11 @@ on:
         description: 'Last date (YYYY-MM-DD)'
         required: true
         default: '2026-09-15'
+  push:
+    branches: [mu-intraday-research-v1]
+    paths:
+      - 'research/mu-intraday/**'
+      - '.github/workflows/mu-intraday-research.yml'
 
 permissions:
   contents: read
@@ -21,6 +26,10 @@ jobs:
     timeout-minutes: 45
     env:
       MASSIVE_API_KEY: ${{ secrets.MASSIVE_API_KEY }}
+      MU_COST_BPS_SIDE: '5'
+      MU_STRESS_BPS_SIDE: '10'
+      START_DATE: ${{ inputs.start || '2025-09-01' }}
+      END_DATE: ${{ inputs.end || '2026-09-15' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -38,14 +47,19 @@ jobs:
           fi
 
       - name: Download 1-minute MU and benchmark bars
-        run: node research/mu-intraday/download.mjs --start "${{ inputs.start }}" --end "${{ inputs.end }}"
+        run: node research/mu-intraday/download.mjs --start "$START_DATE" --end "$END_DATE"
 
-      - name: Build features, labels and setup backtests
+      - name: Build descriptive features and initial setup backtests
         run: node research/mu-intraday/analyze.mjs
 
+      - name: Run cost-aware out-of-sample validation
+        run: node research/mu-intraday/validate.mjs --costBpsSide "$MU_COST_BPS_SIDE" --stressBpsSide "$MU_STRESS_BPS_SIDE"
+
       - name: Upload research results
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: mu-intraday-research-${{ inputs.start }}-${{ inputs.end }}
+          name: mu-intraday-research-${{ env.START_DATE }}-${{ env.END_DATE }}
           path: research-output/mu-intraday/results/
+          if-no-files-found: warn
           retention-days: 30
