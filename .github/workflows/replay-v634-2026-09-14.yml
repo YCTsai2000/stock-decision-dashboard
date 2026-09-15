@@ -1,0 +1,33 @@
+name: V6.3.4 blind minute replay Sep14
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'scripts/replay-v634-2026-09-14-minute.ts'
+      - '.github/workflows/replay-v634-2026-09-14.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Run blind minute replay
+        run: npx --yes tsx scripts/replay-v634-2026-09-14-minute.ts
+      - name: Upload replay results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v634-blind-minute-replay-2026-09-14
+          path: replay-output-v634-2026-09-14/
+          retention-days: 30
