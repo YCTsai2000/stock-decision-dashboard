@@ -1,0 +1,29 @@
+name: V6.3.4 feed diagnostic Sep14
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'scripts/diagnose-v634-feed-2026-09-14.ts'
+      - '.github/workflows/diagnose-v634-feed-2026-09-14.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - name: Compare feeds
+        run: npx --yes tsx scripts/diagnose-v634-feed-2026-09-14.ts
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v634-feed-diagnostic-2026-09-14
+          path: diagnostic-v634-feed-2026-09-14/
+          retention-days: 30
