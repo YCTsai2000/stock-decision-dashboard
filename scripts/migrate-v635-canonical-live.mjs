@@ -41,11 +41,4 @@ mode = mode.replace(/當沖模式 V6\.3\.4/g, '當沖模式 V6.3.5');
 mode = mode.replace(/當沖模式 V6\.3 Adaptive/g, '當沖模式 V6.3.5');
 await fs.writeFile(modePath, mode);
 
-const canonicalWorkflowPath = '.github/workflows/backtest-v634-canonical-1m.yml';
-try {
-  let workflow = await fs.readFile(canonicalWorkflowPath, 'utf8');
-  workflow = workflow.replace(/^name: V6\.3\.4 canonical 1m backtest/m, 'name: V6.3.5 canonical 1m backtest');
-  await fs.writeFile(canonicalWorkflowPath, workflow);
-} catch {}
-
 console.log('Applied V6.3.5 canonical live migration.');
