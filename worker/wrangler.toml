@@ -1,0 +1,10 @@
+name = "stock-decision-api"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+workers_dev = true
+
+[vars]
+# Set to your GitHub Pages origin after first deployment if you want strict CORS.
+# Example: https://yctsai2000.github.io
+ALLOWED_ORIGIN = "https://yctsai2000.github.io"
+SEC_USER_AGENT = "stock-decision-dashboard research"
