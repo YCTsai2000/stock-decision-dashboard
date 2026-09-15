@@ -17,6 +17,8 @@ on:
       - 'research/mu-intraday/**'
       - 'src/muBehavior.ts'
       - 'src/MuResearchPanel.tsx'
+      - 'src/muLocalBacktest.ts'
+      - 'src/MuBacktestPanel.tsx'
       - 'src/ModeShell.tsx'
       - '.github/workflows/mu-intraday-research.yml'
 
