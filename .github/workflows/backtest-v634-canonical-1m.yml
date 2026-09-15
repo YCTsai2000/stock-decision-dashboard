@@ -1,0 +1,33 @@
+name: V6.3.4 canonical 1m backtest
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'scripts/backtest-v634-canonical-1m.ts'
+      - 'src/decisionV6.ts'
+      - 'src/intraday.ts'
+      - 'src/tradingProfiles.ts'
+      - '.github/workflows/backtest-v634-canonical-1m.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - name: Run canonical 1m backtest
+        run: npx --yes tsx scripts/backtest-v634-canonical-1m.ts
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v634-canonical-1m-backtest
+          path: backtest-output-v634-canonical-1m/
+          retention-days: 30
