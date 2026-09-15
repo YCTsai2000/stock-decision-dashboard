@@ -3,7 +3,7 @@ import { buildProfiledDayTradeDecision, EVENT_SHORT_RULE } from '../src/decision
 import { computeIntradayMetrics, getSessionPhase, type IntradayBar, type DayTradeDecisionInput } from '../src/intraday';
 import { getTradingProfile, WATCHLIST, type TradingProfile } from '../src/tradingProfiles';
 
-const FROM = '2026-07-17';
+const FROM = '2026-07-18';
 const TO = '2026-09-15';
 const DAILY_FROM = '2026-03-01';
 const OPEN = 9 * 60 + 30;
