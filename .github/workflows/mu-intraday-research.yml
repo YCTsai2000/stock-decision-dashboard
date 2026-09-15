@@ -39,15 +39,24 @@ jobs:
         with:
           node-version: 22
 
-      - name: Verify Massive key exists
+      - name: Select research data source
+        id: source
         run: |
-          if [ -z "$MASSIVE_API_KEY" ]; then
-            echo "Repository secret MASSIVE_API_KEY is missing."
-            exit 1
+          if [ -n "$MASSIVE_API_KEY" ]; then
+            echo "provider=massive" >> "$GITHUB_OUTPUT"
+            echo "Using Massive 1-minute data."
+          else
+            echo "provider=yahoo" >> "$GITHUB_OUTPUT"
+            echo "MASSIVE_API_KEY missing; using Yahoo 5-minute fallback. Results will be PROVISIONAL_ONLY."
           fi
 
-      - name: Download 1-minute MU and benchmark bars
+      - name: Download Massive 1-minute MU and benchmark bars
+        if: steps.source.outputs.provider == 'massive'
         run: node research/mu-intraday/download.mjs --start "$START_DATE" --end "$END_DATE"
+
+      - name: Download Yahoo 5-minute fallback bars
+        if: steps.source.outputs.provider == 'yahoo'
+        run: node research/mu-intraday/download-yahoo.mjs --start "$START_DATE" --end "$END_DATE"
 
       - name: Build descriptive features and initial setup backtests
         run: node research/mu-intraday/analyze.mjs
