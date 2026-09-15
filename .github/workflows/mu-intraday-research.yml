@@ -1,0 +1,85 @@
+name: MU intraday historical research
+
+on:
+  workflow_dispatch:
+    inputs:
+      start:
+        description: 'First date (YYYY-MM-DD)'
+        required: true
+        default: '2025-09-01'
+      end:
+        description: 'Last date (YYYY-MM-DD)'
+        required: true
+        default: '2026-09-15'
+  push:
+    branches: ['mu-intraday-research-*']
+    paths:
+      - 'research/mu-intraday/**'
+      - 'src/muBehavior.ts'
+      - 'src/MuResearchPanel.tsx'
+      - 'src/muLocalBacktest.ts'
+      - 'src/MuBacktestPanel.tsx'
+      - 'src/ModeShell.tsx'
+      - '.github/workflows/mu-intraday-research.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      MASSIVE_API_KEY: ${{ secrets.MASSIVE_API_KEY }}
+      MU_COST_BPS_SIDE: '5'
+      MU_STRESS_BPS_SIDE: '10'
+      START_DATE: ${{ inputs.start || '2025-09-01' }}
+      END_DATE: ${{ inputs.end || '2026-09-15' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: TypeScript and Vite build
+        run: npm run build
+
+      - name: Select research data source
+        id: source
+        run: |
+          if [ -n "$MASSIVE_API_KEY" ]; then
+            echo "provider=massive" >> "$GITHUB_OUTPUT"
+            echo "Using Massive 1-minute data."
+          else
+            echo "provider=yahoo" >> "$GITHUB_OUTPUT"
+            echo "MASSIVE_API_KEY missing; using Yahoo 5-minute fallback. Results will be PROVISIONAL_ONLY."
+          fi
+
+      - name: Download Massive 1-minute MU and benchmark bars
+        if: steps.source.outputs.provider == 'massive'
+        run: node research/mu-intraday/download.mjs --start "$START_DATE" --end "$END_DATE"
+
+      - name: Download Yahoo 5-minute fallback bars
+        if: steps.source.outputs.provider == 'yahoo'
+        run: node research/mu-intraday/download-yahoo.mjs --start "$START_DATE" --end "$END_DATE"
+
+      - name: Build descriptive features and initial setup backtests
+        run: node research/mu-intraday/analyze.mjs
+
+      - name: Run cost-aware out-of-sample validation
+        run: node research/mu-intraday/validate.mjs --costBpsSide "$MU_COST_BPS_SIDE" --stressBpsSide "$MU_STRESS_BPS_SIDE"
+
+      - name: Upload research results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mu-intraday-research-${{ env.START_DATE }}-${{ env.END_DATE }}
+          path: research-output/mu-intraday/results/
+          if-no-files-found: warn
+          retention-days: 30
