@@ -16,7 +16,6 @@ export const EVENT_SHORT_RULE = {
 export const ADAPTIVE_LONG_RULE = {
   minLongScore: 68,
   minScoreLead: 8,
-  freshBreakoutAgeMin: 10,
   secondChanceMinAgeMin: 10,
   secondChanceMaxAgeMin: 75,
   pullbackTouchAtr: 0.35,
@@ -61,12 +60,6 @@ type EventShortLevels = {
   target2: number;
 };
 
-type BreakoutContext = {
-  firstBreakoutAgeMin: number | null;
-  freshBreakout: boolean;
-  secondChance: boolean;
-};
-
 const calculateBreakdownAgeMin = (input: DayTradeDecisionInput): number | null => {
   const m = input.metrics;
   if (m.latestMinute === null || m.orLow === null) return null;
@@ -75,44 +68,28 @@ const calculateBreakdownAgeMin = (input: DayTradeDecisionInput): number | null =
   return Math.max(0, m.latestMinute - firstBreak.minute);
 };
 
-const calculateBreakoutContext = (input: DayTradeDecisionInput, atr: number): BreakoutContext => {
+const isSecondChanceLong = (input: DayTradeDecisionInput, atr: number): boolean => {
   const m = input.metrics;
   const latest = m.sessionBars.at(-1);
-  if (!latest || m.orHigh === null || m.vwap === null || !m.orReady) {
-    return { firstBreakoutAgeMin: null, freshBreakout: false, secondChance: false };
-  }
-
+  if (!latest || m.orHigh === null || m.vwap === null || !m.orReady) return false;
   const firstBreakoutIndex = m.sessionBars.findIndex(bar => bar.minute >= 9 * 60 + 45 && bar.close > m.orHigh!);
-  if (firstBreakoutIndex < 0) {
-    return { firstBreakoutAgeMin: null, freshBreakout: false, secondChance: false };
-  }
-
-  const firstBreakout = m.sessionBars[firstBreakoutIndex];
-  const age = Math.max(0, latest.minute - firstBreakout.minute);
-  const freshBreakout = age <= ADAPTIVE_LONG_RULE.freshBreakoutAgeMin;
-  if (age < ADAPTIVE_LONG_RULE.secondChanceMinAgeMin || age > ADAPTIVE_LONG_RULE.secondChanceMaxAgeMin) {
-    return { firstBreakoutAgeMin: age, freshBreakout, secondChance: false };
-  }
-
+  if (firstBreakoutIndex < 0) return false;
+  const age = Math.max(0, latest.minute - m.sessionBars[firstBreakoutIndex].minute);
+  if (age < ADAPTIVE_LONG_RULE.secondChanceMinAgeMin || age > ADAPTIVE_LONG_RULE.secondChanceMaxAgeMin) return false;
   const between = m.sessionBars.slice(firstBreakoutIndex + 1, -1);
   const pullbackHeld = between.some(bar => (
     bar.low <= m.orHigh! + atr * ADAPTIVE_LONG_RULE.pullbackTouchAtr
     && bar.close >= m.orHigh! - atr * ADAPTIVE_LONG_RULE.pullbackHoldAtr
   ));
   const previous = m.sessionBars.at(-2);
-  const turnedBackUp = Boolean(
-    previous
+  return Boolean(
+    pullbackHeld
+    && previous
     && latest.close > previous.close
     && latest.close > latest.open
     && latest.close > m.orHigh
     && latest.close > m.vwap
   );
-
-  return {
-    firstBreakoutAgeMin: age,
-    freshBreakout,
-    secondChance: pullbackHeld && turnedBackUp,
-  };
 };
 
 const calculateEventShortLevels = (
@@ -142,7 +119,43 @@ const calculateEventShortLevels = (
   };
 };
 
-const buildAdaptiveLongDecision = (
+const resizeLongDecision = (
+  input: DayTradeDecisionInput,
+  decision: DayTradeDecision,
+  setupFactor: number,
+): DayTradeDecision => {
+  if (decision.entry === null || decision.riskPerShare === null || decision.riskPerShare <= 0) return decision;
+  const regimeFactor = marketRegimeRiskFactor(input.marketMode);
+  const riskBudget = Math.min(
+    input.accountSizeUsd * (input.riskPerTradePct / 100) * setupFactor * regimeFactor * decision.phaseFactor,
+    decision.remainingDailyRiskUsd,
+  );
+  const maxRiskShares = Math.floor(Math.max(0, riskBudget) / decision.riskPerShare);
+  const maxAllocationShares = Math.floor((input.accountSizeUsd * (input.maxAllocationPct / 100)) / decision.entry);
+  const suggestedShares = Math.max(0, Math.min(maxRiskShares, maxAllocationShares));
+  return {
+    ...decision,
+    suggestedShares,
+    suggestedRiskUsd: suggestedShares * decision.riskPerShare,
+  };
+};
+
+const tagNormalLong = (
+  input: DayTradeDecisionInput,
+  normal: DayTradeDecision,
+): DayTradeDecision => {
+  const isAPlus = normal.label.includes('A+ Profile');
+  const setupFactor = isAPlus ? ADAPTIVE_LONG_RULE.aPlusRiskFactor : ADAPTIVE_LONG_RULE.aRiskFactor;
+  const regimeFactor = marketRegimeRiskFactor(input.marketMode);
+  const resized = resizeLongDecision(input, normal, setupFactor);
+  return {
+    ...resized,
+    label: `${normal.label} · ${input.marketMode}`,
+    reason: `${normal.reason} V6.3.1 保留原 A/A+ 首次有效進場，不因 Second-Chance 邏輯延後；Setup risk ${Math.round(setupFactor * 100)}% × Regime ${Math.round(regimeFactor * 100)}% × Session ${Math.round(normal.phaseFactor * 100)}%。`,
+  };
+};
+
+const buildAdaptiveProbeLong = (
   input: DayTradeDecisionInput,
   base: DayTradeDecision,
   profile: TradingProfile,
@@ -153,14 +166,13 @@ const buildAdaptiveLongDecision = (
   const rvol = m.rvol;
   const rs = m.relativeStrengthPct;
   if (base.hardBlock || price === null || price <= 0 || minute === null || rvol === null || rs === null) return null;
-  if (minute < profile.minEntryMinute || rvol < profile.probeMinRvol) return null;
+  if (minute < profile.minEntryMinute || rvol < profile.probeMinRvol || rvol >= profile.minRvol) return null;
   if (!m.orReady || m.orHigh === null || m.vwap === null) return null;
   if (!(price > m.vwap && m.vwapSlopeUp === true && m.benchmarkAboveVwap === true && rs > 0 && price > m.orHigh)) return null;
   if (base.longScore < ADAPTIVE_LONG_RULE.minLongScore || base.longScore - base.shortScore < ADAPTIVE_LONG_RULE.minScoreLead) return null;
 
   const atr = m.intradayAtr ?? Math.max(price * 0.002, 0.01);
-  const breakout = calculateBreakoutContext(input, atr);
-  if (!breakout.freshBreakout && !breakout.secondChance) return null;
+  if (!isSecondChanceLong(input, atr)) return null;
 
   const entry = price;
   const candidates = [
@@ -169,34 +181,24 @@ const buildAdaptiveLongDecision = (
     m.recentLow !== null ? m.recentLow - atr * 0.10 : null,
   ].filter((v): v is number => v !== null && v < entry);
   const structural = candidates.length ? Math.max(...candidates) : entry - atr * 0.5;
-  const coreStop = Math.max(0.01, Math.min(structural, entry - atr * 0.35));
-  const stop = Math.max(0.01, Math.min(coreStop, entry - atr * profile.minStopAtr));
+  const stop = Math.max(0.01, Math.min(structural, entry - atr * profile.minStopAtr));
   const riskPerShare = Math.max(0.01, entry - stop);
   const target1 = entry + riskPerShare * profile.target1R;
   const target2 = entry + riskPerShare * profile.target2R;
-
-  const grade = rvol >= profile.highConvictionRvol ? 'A+' : rvol >= profile.minRvol ? 'A' : 'B+';
-  const setupFactor = grade === 'A+' ? ADAPTIVE_LONG_RULE.aPlusRiskFactor : grade === 'A' ? ADAPTIVE_LONG_RULE.aRiskFactor : ADAPTIVE_LONG_RULE.probeRiskFactor;
   const regimeFactor = marketRegimeRiskFactor(input.marketMode);
-  const baseRiskBudget = input.accountSizeUsd * (input.riskPerTradePct / 100);
-  const adjustedBudget = baseRiskBudget * setupFactor * regimeFactor * base.phaseFactor;
-  const riskBudget = Math.min(adjustedBudget, base.remainingDailyRiskUsd);
+  const riskBudget = Math.min(
+    input.accountSizeUsd * (input.riskPerTradePct / 100) * ADAPTIVE_LONG_RULE.probeRiskFactor * regimeFactor * base.phaseFactor,
+    base.remainingDailyRiskUsd,
+  );
   const maxRiskShares = Math.floor(Math.max(0, riskBudget) / riskPerShare);
   const maxAllocationShares = Math.floor((input.accountSizeUsd * (input.maxAllocationPct / 100)) / entry);
   const suggestedShares = Math.max(0, Math.min(maxRiskShares, maxAllocationShares));
-  const entryStyle = breakout.secondChance ? 'SECOND-CHANCE reclaim' : 'fresh OR15 breakout';
-  const regimeTag = input.marketMode;
-  const label = grade === 'A+'
-    ? `LONG · A+ Profile · ${regimeTag}${breakout.secondChance ? ' · 2ND CHANCE' : ''}`
-    : grade === 'A'
-      ? `LONG · A Profile · ${regimeTag}${breakout.secondChance ? ' · 2ND CHANCE' : ''}`
-      : `LONG · B+ PROBE · ${regimeTag}${breakout.secondChance ? ' · 2ND CHANCE' : ''}`;
 
   return {
     ...base,
     direction: 'LONG',
-    label,
-    reason: `V6.3 Adaptive：${profile.label}，${entryStyle}；Price > VWAP、VWAP slope ↑、${profile.benchmark} > VWAP、RS ${rs.toFixed(2)}% > 0。RVOL ${rvol.toFixed(2)}x → ${grade}；Setup risk ${Math.round(setupFactor * 100)}% × Regime ${input.marketMode} ${Math.round(regimeFactor * 100)}% × Session ${Math.round(base.phaseFactor * 100)}%。Market Regime 不再一票否決，只調整部位。`,
+    label: `LONG · B+ PROBE · ${input.marketMode} · 2ND CHANCE`,
+    reason: `V6.3.1 Probe：${profile.label} 首次突破後回測 OR15 並重新轉強；Price > VWAP、VWAP slope ↑、${profile.benchmark} > VWAP、RS ${rs.toFixed(2)}% > 0。RVOL ${rvol.toFixed(2)}x 尚未達 A 門檻，因此只用 25% Probe risk × Regime ${Math.round(regimeFactor * 100)}% × Session ${Math.round(base.phaseFactor * 100)}%。fresh B+ 不追。`,
     entry,
     stop,
     target1,
@@ -253,7 +255,7 @@ const buildEventShortDecision = (
     ...base,
     direction: 'SHORT',
     label: 'SHORT · EVENT REVERSAL',
-    reason: `V6.3 事件反轉：Gap ${m.gapPct?.toFixed(2)}%、RVOL ${m.rvol?.toFixed(2)}x、RS ${m.relativeStrengthPct?.toFixed(2)}%；OR15 Low 為新鮮跌破（Age ${breakdownAgeMin}m ≤ ${EVENT_SHORT_RULE.maxBreakdownAgeMin}m），且 VWAP / Benchmark 同步轉弱；原型股技術 Stop ${stopPct.toFixed(2)}% ≤ ${EVENT_SHORT_RULE.maxUnderlyingStopPct.toFixed(1)}%。Daily LONG 僅在此極端條件下被覆寫，事件單使用一般風險的 50%，再乘 Session factor。`,
+    reason: `V6.3.1 事件反轉：Gap ${m.gapPct?.toFixed(2)}%、RVOL ${m.rvol?.toFixed(2)}x、RS ${m.relativeStrengthPct?.toFixed(2)}%；OR15 Low 新鮮跌破（Age ${breakdownAgeMin}m ≤ ${EVENT_SHORT_RULE.maxBreakdownAgeMin}m），且 VWAP / Benchmark 同步轉弱；原型股 Stop ${stopPct.toFixed(2)}% ≤ ${EVENT_SHORT_RULE.maxUnderlyingStopPct.toFixed(1)}%。事件單使用 50% risk，再乘 Session factor。`,
     entry,
     stop,
     target1,
@@ -268,21 +270,7 @@ const pauseNormalShort = (decision: DayTradeDecision): DayTradeDecision => ({
   ...decision,
   direction: 'WAIT',
   label: 'WATCH · NORMAL SHORT RESEARCH',
-  reason: `V6.3：一般 Short 子模型仍只觀察，不實際進場；只有嚴格 Event Reversal Short 可以進場。原訊號：${decision.reason}`,
-  entry: null,
-  stop: null,
-  target1: null,
-  target2: null,
-  riskPerShare: null,
-  suggestedShares: 0,
-  suggestedRiskUsd: 0,
-});
-
-const blockLegacyLong = (decision: DayTradeDecision, profile: TradingProfile): DayTradeDecision => ({
-  ...decision,
-  direction: 'WAIT',
-  label: 'WATCH · V6.3 ENTRY TIMING',
-  reason: `V6.3：${profile.label} 的舊版 Long 條件雖成立，但目前既不是 breakout 後 ${ADAPTIVE_LONG_RULE.freshBreakoutAgeMin} 分鐘內的新鮮訊號，也沒有形成可辨識的 Second-Chance reclaim，因此不追價。`,
+  reason: `V6.3.1：一般 Short 子模型仍只觀察；只有嚴格 Event Reversal Short 可以進場。原訊號：${decision.reason}`,
   entry: null,
   stop: null,
   target1: null,
@@ -300,11 +288,11 @@ export const buildProfiledDayTradeDecision = (
   const normal = applyTradingProfile(input, base, profile);
   if (normal.hardBlock) return normal;
 
-  const adaptiveLong = buildAdaptiveLongDecision(input, base, profile);
-  if (adaptiveLong) return adaptiveLong;
-
+  if (normal.direction === 'LONG') return tagNormalLong(input, normal);
   if (normal.direction === 'SHORT') return pauseNormalShort(normal);
   if (isEventShortOverride(input, base, profile)) return buildEventShortDecision(input, base, profile);
-  if (normal.direction === 'LONG') return blockLegacyLong(normal, profile);
+
+  const probe = buildAdaptiveProbeLong(input, base, profile);
+  if (probe) return probe;
   return normal;
 };
