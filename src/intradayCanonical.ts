@@ -62,7 +62,7 @@ const normalizeOneMinuteBars = (bars: IntradayBar[]) => {
  * Canonical V6 data contract:
  * provider 1m bars -> locally aggregate only completed 5m buckets.
  * Historical buckets tolerate one missing 1m print (>=4 bars), matching the canonical replay.
- * The current unfinished 5m bucket is never exposed to the decision engine.
+ * Today's bucket is stricter: all five 1m bars must actually be present before it can drive a signal.
  */
 export const aggregateCanonicalFiveMinuteBars = (rawBars: IntradayBar[], now = getNewYorkClock()): IntradayBar[] => {
   const bars = normalizeOneMinuteBars(rawBars);
@@ -77,11 +77,17 @@ export const aggregateCanonicalFiveMinuteBars = (rawBars: IntradayBar[], now = g
 
   const out: IntradayBar[] = [];
   for (const values of buckets.values()) {
-    if (values.length < 4) continue;
     values.sort((a, b) => a.minute - b.minute);
     const first = values[0];
-    const last = values.at(-1)!;
+    if (!first) continue;
     const bucketMinute = REGULAR_OPEN + Math.floor((first.minute - REGULAR_OPEN) / 5) * 5;
+    const isToday = first.date === now.date;
+    if (isToday) {
+      if (values.length < 5 || first.minute !== bucketMinute || values.at(-1)!.minute !== bucketMinute + 4) continue;
+    } else if (values.length < 4) {
+      continue;
+    }
+    const last = values.at(-1)!;
     out.push({
       date: first.date,
       time: formatMinute(bucketMinute),
