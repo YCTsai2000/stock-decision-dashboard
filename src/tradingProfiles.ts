@@ -9,6 +9,7 @@ export interface TradingProfile {
   benchmark: string;
   secondaryBenchmark: string;
   minEntryMinute: number;
+  probeMinRvol: number;
   minRvol: number;
   highConvictionRvol: number;
   minStopAtr: number;
@@ -22,6 +23,7 @@ export interface TradingProfile {
 
 const BASE: Omit<TradingProfile, 'symbol' | 'family' | 'label' | 'benchmark' | 'secondaryBenchmark' | 'note'> = {
   minEntryMinute: 10 * 60,
+  probeMinRvol: 0.7,
   minRvol: 1.2,
   highConvictionRvol: 1.5,
   minStopAtr: 0.65,
@@ -50,7 +52,7 @@ const PROFILES: Record<string, TradingProfile> = {
   LITE: make({ symbol: 'LITE', family: 'OPTICAL', label: 'Optical / Photonics', benchmark: 'XLK', secondaryBenchmark: 'QQQ', note: '目前用 XLK 作 sector proxy；未來可再加入 COHR/CIEN peer basket。' }),
   DELL: make({ symbol: 'DELL', family: 'HARDWARE', label: 'AI Infrastructure / Enterprise Hardware', benchmark: 'XLK', secondaryBenchmark: 'QQQ', note: 'DELL 以 XLK 作硬體/科技 sector proxy，QQQ 作次要 AI 成長市場背景。' }),
   TSLA: make({ symbol: 'TSLA', family: 'EV_GROWTH', label: 'EV / High-beta Growth', benchmark: 'XLY', secondaryBenchmark: 'QQQ', minStopAtr: 0.75, note: 'TSLA 高波動，停損下限提高到 0.75 ATR；XLY 為主要 sector proxy。' }),
-  SPCX: make({ symbol: 'SPCX', family: 'SPACE_IPO', label: 'Space / New Listing', benchmark: 'XAR', secondaryBenchmark: 'QQQ', minRvol: 1.5, highConvictionRvol: 2.0, minStopAtr: 0.8, minEntryMinute: 10 * 60 + 15, experimental: true, note: '上市歷史較短，長週期統計不足；採較嚴格 RVOL、ATR 與 10:15 後條件，屬實驗型 profile。' }),
+  SPCX: make({ symbol: 'SPCX', family: 'SPACE_IPO', label: 'Space / New Listing', benchmark: 'XAR', secondaryBenchmark: 'QQQ', probeMinRvol: 1.0, minRvol: 1.5, highConvictionRvol: 2.0, minStopAtr: 0.8, minEntryMinute: 10 * 60 + 15, experimental: true, note: '上市歷史較短，長週期統計不足；Probe 仍要求 RVOL 1.0x、正式 A setup 要 1.5x，並採較寬 ATR 與 10:15 後條件。' }),
 };
 
 export const getTradingProfile = (symbol: string): TradingProfile => {
