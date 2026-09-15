@@ -22,10 +22,12 @@ export interface TradingProfile {
 }
 
 const BASE: Omit<TradingProfile, 'symbol' | 'family' | 'label' | 'benchmark' | 'secondaryBenchmark' | 'note'> = {
-  minEntryMinute: 10 * 60,
-  probeMinRvol: 0.7,
-  minRvol: 1.2,
-  highConvictionRvol: 1.5,
+  // V6.3.2 Adaptive Entry: allow high-liquidity names to participate shortly after OR15
+  // instead of waiting until 10:00 ET. Risk is still reduced by setup/regime/session factors.
+  minEntryMinute: 9 * 60 + 50,
+  probeMinRvol: 0.6,
+  minRvol: 1.0,
+  highConvictionRvol: 1.4,
   minStopAtr: 0.65,
   target1R: 1.75,
   target2R: 2.0,
@@ -88,8 +90,6 @@ export const applyTradingProfile = (
   const m = input.metrics;
   const minute = m.latestMinute;
   const price = m.currentPrice;
-  // Early in the session ATR(14) is not warmed up yet. Do not bypass the profile
-  // stop floor; use the same conservative fallback as the core decision engine.
   const atr = m.intradayAtr ?? (price !== null ? Math.max(price * 0.002, 0.01) : null);
   const rvol = m.rvol;
   const brokeOrHigh = price !== null && m.orHigh !== null && m.orReady && price > m.orHigh;
