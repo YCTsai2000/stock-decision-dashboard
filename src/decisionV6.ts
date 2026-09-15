@@ -154,7 +154,7 @@ const resizeLongDecision = (
 const pauseLong = (decision: DayTradeDecision, reason: string): DayTradeDecision => ({
   ...decision,
   direction: 'WAIT',
-  label: 'WATCH · V6.3.4 LONG FILTER',
+  label: 'WATCH · V6.3.5 LONG FILTER',
   reason,
   entry: null,
   stop: null,
@@ -179,7 +179,7 @@ const tagNormalLong = (
   return {
     ...resized,
     label: `${normal.label} · ${input.marketMode}${suffix}`,
-    reason: `${normal.reason} V6.3.4：Setup risk ${Math.round(setupFactor * 100)}% × Timing ${Math.round(timingFactor * 100)}% × Regime ${Math.round(regimeFactor * 100)}% × Session ${Math.round(normal.phaseFactor * 100)}%。`,
+    reason: `${normal.reason} V6.3.5：Setup risk ${Math.round(setupFactor * 100)}% × Timing ${Math.round(timingFactor * 100)}% × Regime ${Math.round(regimeFactor * 100)}% × Session ${Math.round(normal.phaseFactor * 100)}%。`,
   };
 };
 
@@ -190,42 +190,49 @@ const moderateVolumeConfirmed = (input: DayTradeDecisionInput): boolean => {
   return isSecondChanceLong(input, atr);
 };
 
+const moderateVolumeContextAligned = (input: DayTradeDecisionInput): boolean => (
+  input.marketMode === 'RISK_ON' || input.dailyBias === 'LONG'
+);
+
 const applyNormalLongTimingPolicy = (
   input: DayTradeDecisionInput,
   normal: DayTradeDecision,
 ): DayTradeDecision => {
   const minute = input.metrics.latestMinute;
-  if (minute === null) return pauseLong(normal, 'V6.3.4：缺少盤中時間，僅觀察。');
+  if (minute === null) return pauseLong(normal, 'V6.3.5：缺少盤中時間，僅觀察。');
   const isAPlus = normal.label.includes('A+ Profile');
 
   if (minute < ADAPTIVE_LONG_RULE.coreStartMinute) {
     if (isAPlus && input.dailyBias === 'LONG') {
       return tagNormalLong(input, normal, 'EARLY ALIGNED', ADAPTIVE_LONG_RULE.earlyAlignedAPlusFactor);
     }
-    return pauseLong(normal, 'V6.3.4：09:50–10:15 ET 為價格發現期；只有 Daily LONG 的 A+ 可用半風險試單，其餘等待核心窗口。');
+    return pauseLong(normal, 'V6.3.5：09:50–10:15 ET 為價格發現期；只有 Daily LONG 的 A+ 可用半風險試單，其餘等待核心窗口。');
   }
 
   if (minute < ADAPTIVE_LONG_RULE.coreEndMinute) {
     if (input.dailyBias === 'SHORT') {
-      return pauseLong(normal, 'V6.3.4：10:15–11:00 ET 雖為核心窗口，但 Daily Bias = SHORT，LONG 不逆日線趨勢。');
+      return pauseLong(normal, 'V6.3.5：10:15–11:00 ET 雖為核心窗口，但 Daily Bias = SHORT，LONG 不逆日線趨勢。');
     }
     if (!isAPlus && !moderateVolumeConfirmed(input)) {
-      return pauseLong(normal, 'V6.3.4：A setup 的中等量能第一次突破不直接進場；等待 OR15 回測守住後再次轉強，才視為 A CONFIRMED。');
+      return pauseLong(normal, 'V6.3.5：A setup 的中等量能第一次突破不直接進場；等待 OR15 回測守住後再次轉強，才視為 A CONFIRMED。');
     }
-    return tagNormalLong(input, normal, isAPlus ? '' : 'A CONFIRMED 2ND CHANCE');
+    if (!isAPlus && !moderateVolumeContextAligned(input)) {
+      return pauseLong(normal, 'V6.3.5：A CONFIRMED 屬中等量能二次突破，必須至少有 Market RISK_ON 或 Daily Bias = LONG 其中一項背景支持。');
+    }
+    return tagNormalLong(input, normal, isAPlus ? '' : 'A CONFIRMED 2ND CHANCE · CONTEXT ALIGNED');
   }
 
   if (minute < ADAPTIVE_LONG_RULE.continuationEndMinute) {
     if (input.dailyBias !== 'LONG') {
-      return pauseLong(normal, 'V6.3.4：11:00–12:00 ET 僅保留 Daily LONG 的趨勢延續單。');
+      return pauseLong(normal, 'V6.3.5：11:00–12:00 ET 僅保留 Daily LONG 的趨勢延續單。');
     }
     if (!isAPlus && !moderateVolumeConfirmed(input)) {
-      return pauseLong(normal, 'V6.3.4：11:00–12:00 的 A setup 亦需 Second-Chance confirmation，避免低量延後突破。');
+      return pauseLong(normal, 'V6.3.5：11:00–12:00 的 A setup 亦需 Second-Chance confirmation，避免低量延後突破。');
     }
-    return tagNormalLong(input, normal, isAPlus ? 'ALIGNED CONTINUATION' : 'A CONFIRMED · ALIGNED CONTINUATION', ADAPTIVE_LONG_RULE.alignedContinuationFactor);
+    return tagNormalLong(input, normal, isAPlus ? 'ALIGNED CONTINUATION' : 'A CONFIRMED · ALIGNED CONTINUATION · CONTEXT ALIGNED', ADAPTIVE_LONG_RULE.alignedContinuationFactor);
   }
 
-  return pauseLong(normal, 'V6.3.4：12:00 ET 後 LONG 新倉暫停；樣本顯示午盤後新突破的假突破成本偏高。');
+  return pauseLong(normal, 'V6.3.5：12:00 ET 後 LONG 新倉暫停；樣本顯示午盤後新突破的假突破成本偏高。');
 };
 
 const buildAdaptiveProbeLong = (
@@ -275,7 +282,7 @@ const buildAdaptiveProbeLong = (
     ...base,
     direction: 'LONG',
     label: `LONG · B+ PROBE · ${input.marketMode} · 2ND CHANCE · ALIGNED CONTINUATION`,
-    reason: `V6.3.4 Probe：低量能 B+ 不再參與核心時段的第一次/二次突破；只保留 11:00–12:00 ET、Daily LONG 的趨勢延續 Second-Chance。Price > VWAP、VWAP slope ↑、${profile.benchmark} > VWAP、RS ${rs.toFixed(2)}% > 0，RVOL ${rvol.toFixed(2)}x。使用 25% Probe risk × Timing ${Math.round(timingFactor * 100)}% × Regime ${Math.round(regimeFactor * 100)}% × Session ${Math.round(base.phaseFactor * 100)}%。`,
+    reason: `V6.3.5 Probe：低量能 B+ 不再參與核心時段的第一次/二次突破；只保留 11:00–12:00 ET、Daily LONG 的趨勢延續 Second-Chance。Price > VWAP、VWAP slope ↑、${profile.benchmark} > VWAP、RS ${rs.toFixed(2)}% > 0，RVOL ${rvol.toFixed(2)}x。使用 25% Probe risk × Timing ${Math.round(timingFactor * 100)}% × Regime ${Math.round(regimeFactor * 100)}% × Session ${Math.round(base.phaseFactor * 100)}%。`,
     entry,
     stop,
     target1,
@@ -332,7 +339,7 @@ const buildEventShortDecision = (
     ...base,
     direction: 'SHORT',
     label: 'SHORT · EVENT REVERSAL',
-    reason: `V6.3.4 事件反轉：Gap ${m.gapPct?.toFixed(2)}%、RVOL ${m.rvol?.toFixed(2)}x、RS ${m.relativeStrengthPct?.toFixed(2)}%；OR15 Low 新鮮跌破（Age ${breakdownAgeMin}m ≤ ${EVENT_SHORT_RULE.maxBreakdownAgeMin}m），且 VWAP / Benchmark 同步轉弱；原型股 Stop ${stopPct.toFixed(2)}% ≤ ${EVENT_SHORT_RULE.maxUnderlyingStopPct.toFixed(1)}%。事件單使用 50% risk，再乘 Session factor。`,
+    reason: `V6.3.5 事件反轉：Gap ${m.gapPct?.toFixed(2)}%、RVOL ${m.rvol?.toFixed(2)}x、RS ${m.relativeStrengthPct?.toFixed(2)}%；OR15 Low 新鮮跌破（Age ${breakdownAgeMin}m ≤ ${EVENT_SHORT_RULE.maxBreakdownAgeMin}m），且 VWAP / Benchmark 同步轉弱；原型股 Stop ${stopPct.toFixed(2)}% ≤ ${EVENT_SHORT_RULE.maxUnderlyingStopPct.toFixed(1)}%。事件單使用 50% risk，再乘 Session factor。`,
     entry,
     stop,
     target1,
@@ -347,7 +354,7 @@ const pauseNormalShort = (decision: DayTradeDecision): DayTradeDecision => ({
   ...decision,
   direction: 'WAIT',
   label: 'WATCH · NORMAL SHORT RESEARCH',
-  reason: `V6.3.4：一般 Short 子模型仍只觀察；只有嚴格 Event Reversal Short 可以進場。原訊號：${decision.reason}`,
+  reason: `V6.3.5：一般 Short 子模型仍只觀察；只有嚴格 Event Reversal Short 可以進場。原訊號：${decision.reason}`,
   entry: null,
   stop: null,
   target1: null,
