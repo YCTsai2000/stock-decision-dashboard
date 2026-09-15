@@ -10,6 +10,7 @@ import type {
   SourceMeta,
   StockDataPoint,
 } from './types';
+import { effectiveApiKey, routeApiRequest } from './apiProxy';
 
 const REQUEST_TIMEOUT_MS = 10_000;
 const PRICE_CACHE_MS = 6 * 60 * 60 * 1000;
@@ -26,7 +27,7 @@ interface CacheEnvelope<T> {
 }
 
 const now = () => Date.now();
-const cleanKey = (value: string | undefined) => (value ?? '').trim();
+const cleanKey = (value: string | undefined) => effectiveApiKey(value);
 
 const readCache = <T,>(key: string, ttlMs: number): T | null => {
   if (typeof window === 'undefined') return null;
@@ -75,7 +76,7 @@ const fetchWithTimeout = async (
   signal?.addEventListener('abort', abortOuter);
 
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    return await fetch(routeApiRequest(url), { ...init, signal: controller.signal });
   } finally {
     window.clearTimeout(timeoutId);
     signal?.removeEventListener('abort', abortOuter);

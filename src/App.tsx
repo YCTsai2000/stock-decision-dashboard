@@ -64,6 +64,7 @@ import {
   fetchSecFundamentals,
   hasAnyHistoricalPriceKey,
 } from './dataLayer';
+import { hasProviderAccess, isApiProxyConfigured } from './apiProxy';
 
 const REFRESH_SECONDS = 300;
 const MAX_SYMBOLS = 8;
@@ -552,6 +553,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(() => !hasAnyHistoricalPriceKey(loadStoredKeys()));
   const [isUpdating, setIsUpdating] = useState(false);
   const [countdown, setCountdown] = useState(REFRESH_SECONDS);
+  const proxyEnabled = isApiProxyConfigured();
 
   const [accountSizeUsd, setAccountSizeUsd] = useState(() => Number(localStorage.getItem('tradeAccountSizeUsd') || 15000));
   const [riskPct, setRiskPct] = useState(() => Number(localStorage.getItem('tradeRiskPct') || 1));
@@ -598,7 +600,7 @@ export default function App() {
   }, []);
 
   const loadQuotes = useCallback(async (list: string[], signal?: AbortSignal) => {
-    if (!keysRef.current.finnhub.trim() && !keysRef.current.massive.trim()) return;
+    if (!hasProviderAccess(keysRef.current, ['finnhub', 'massive'])) return;
     await Promise.all(list.map(async symbol => {
       try {
         const quote = await fetchQuote(symbol, keysRef.current, signal);
@@ -697,7 +699,7 @@ export default function App() {
     setErrorMsg('已清除 API 資料快取；按「重新分析」可強制抓取最新資料。');
   };
 
-  const providerCount = Object.values(keys).filter(value => value.trim()).length;
+  const providerCount = proxyEnabled ? 5 : Object.values(keys).filter(value => value.trim()).length;
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200 p-4 md:p-8 selection:bg-emerald-500/30">
@@ -722,11 +724,23 @@ export default function App() {
 
         {settingsOpen && (
           <section className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4">
-            <div className="flex items-start gap-2 mb-4">
-              <ShieldAlert size={17} className="text-amber-400 mt-0.5" />
-              <div className="text-xs text-slate-400 leading-relaxed">API Key 只存於你目前瀏覽器的 localStorage，不會寫進 GitHub repository。GitHub Pages 是純前端，任何放進原始碼或 Vite 環境變數的秘密都可能被訪客看到，因此本專案刻意不把 Key 打包進網站。</div>
-            </div>
-            <ProviderSettings keys={keys} setKeys={setKeys} onClearCache={handleClearCache} />
+            {proxyEnabled ? (
+              <div className="flex flex-col gap-3">
+                <div className="flex items-start gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3">
+                  <ShieldAlert size={17} className="text-emerald-300 mt-0.5" />
+                  <div className="text-xs text-emerald-100 leading-relaxed"><strong>Secure API Proxy 已啟用。</strong> Massive / Twelve Data / Finnhub / FMP / FRED 的秘密金鑰由伺服器端管理，這個瀏覽器不需要再輸入 API Key，也不會把 Key 打包進 GitHub Pages。</div>
+                </div>
+                <button onClick={handleClearCache} className="self-start text-xs border border-slate-700 hover:border-rose-500/50 hover:text-rose-300 rounded-lg px-3 py-2 transition-colors">清除資料快取</button>
+              </div>
+            ) : (
+              <>
+                <div className="flex items-start gap-2 mb-4">
+                  <ShieldAlert size={17} className="text-amber-400 mt-0.5" />
+                  <div className="text-xs text-slate-400 leading-relaxed">尚未設定 Secure API Proxy，因此暫時使用瀏覽器 localStorage 模式。API Key 不會寫進 repository，但換瀏覽器時仍需重新輸入。</div>
+                </div>
+                <ProviderSettings keys={keys} setKeys={setKeys} onClearCache={handleClearCache} />
+              </>
+            )}
           </section>
         )}
 

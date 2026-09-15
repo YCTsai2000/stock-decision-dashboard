@@ -11,6 +11,7 @@ import {
 import { buildProfiledDayTradeDecision } from './decisionV6';
 import { getTradingProfile, WATCHLIST } from './tradingProfiles';
 import { getExecutionForDirection, type ExecutionSide } from './tradingInstruments';
+import { hasProviderAccess, isApiProxyConfigured } from './apiProxy';
 
 type MarketMode = 'RISK_ON' | 'NEUTRAL' | 'RISK_OFF';
 type RankState = 'LONG' | 'SHORT' | 'WATCH_LONG' | 'WATCH_SHORT' | 'WAIT' | 'AVOID';
@@ -168,7 +169,7 @@ export default function WatchlistRankerV6({ keys, marketMode, onSelect, liveBySy
 
   const scan = useCallback(async () => {
     if (scanningRef.current) return;
-    if (!keys.twelve.trim() && !keys.massive.trim() && !keys.finnhub.trim()) {
+    if (!hasProviderAccess(keys, ['twelve', 'massive', 'finnhub'])) {
       setError('至少需要 Twelve Data、Massive 或 Finnhub 其中一組 Key 才能掃描。');
       return;
     }
@@ -178,7 +179,7 @@ export default function WatchlistRankerV6({ keys, marketMode, onSelect, liveBySy
     setScanning(true);
     setError('');
     const benchmarkCache = new Map<string, Awaited<ReturnType<typeof fetchIntradayData>>>();
-    const pace = keys.twelve.trim() ? TWELVE_PACE_MS : FALLBACK_PACE_MS;
+    const pace = (isApiProxyConfigured() || keys.twelve.trim()) ? TWELVE_PACE_MS : FALLBACK_PACE_MS;
 
     try {
       for (let i = 0; i < WATCHLIST.length; i++) {

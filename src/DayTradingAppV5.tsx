@@ -21,6 +21,7 @@ import {
   type LeveragedExecution,
 } from './tradingInstruments';
 import WatchlistRanker from './WatchlistRankerV6';
+import { hasProviderAccess, isApiProxyConfigured } from './apiProxy';
 
 const EMPTY_KEYS: ApiKeys = { massive: '', finnhub: '', fmp: '', twelve: '', fred: '' };
 const REFRESH_MS = 180_000;
@@ -129,6 +130,7 @@ export default function DayTradingAppV5() {
   const [account, setAccount] = useState(riskDefaults.account);
   const [riskPct, setRiskPct] = useState(riskDefaults.riskPct);
   const [maxAlloc, setMaxAlloc] = useState(riskDefaults.maxAlloc);
+  const proxyEnabled = isApiProxyConfigured();
 
   const profile = useMemo(() => getTradingProfile(active), [active]);
   const instrument = useMemo(() => getTradingInstrument(active), [active]);
@@ -158,8 +160,8 @@ export default function DayTradingAppV5() {
   }, [streamSymbols, alpaca.keyId, alpaca.secret]);
 
   const refresh = useCallback(async () => {
-    if (!keys.twelve.trim() && !keys.massive.trim() && !keys.finnhub.trim()) {
-      setError('請先在頂端設定區填入 Twelve Data、Massive 或 Finnhub 至少一組 Key。');
+    if (!hasProviderAccess(keys, ['twelve', 'massive', 'finnhub'])) {
+      setError('尚未設定 Secure API Proxy，且瀏覽器中也沒有 Twelve Data、Massive 或 Finnhub Key。');
       return;
     }
     setLoading(true); setError('');
@@ -179,7 +181,7 @@ export default function DayTradingAppV5() {
   }, [active, benchmark, keys]);
 
   useEffect(() => {
-    if (!keys.twelve.trim() && !keys.massive.trim() && !keys.finnhub.trim()) return;
+    if (!hasProviderAccess(keys, ['twelve', 'massive', 'finnhub'])) return;
     void refresh();
     const id = window.setInterval(() => void refresh(), REFRESH_MS);
     return () => window.clearInterval(id);
@@ -238,7 +240,7 @@ export default function DayTradingAppV5() {
       ? `偏空 → BUY ${execution?.ticker ?? '無反向ETF'}`
       : 'WAIT';
 
-  const providerReady = Boolean(keys.twelve.trim() || keys.massive.trim() || keys.finnhub.trim());
+  const providerReady = hasProviderAccess(keys, ['twelve', 'massive', 'finnhub']);
   const alpacaReady = Boolean(alpaca.keyId.trim() && alpaca.secret.trim());
 
   return <div className="min-h-screen bg-slate-950 text-slate-200 pt-14 pb-16">
@@ -276,10 +278,16 @@ export default function DayTradingAppV5() {
         <div className="grid gap-4 xl:grid-cols-2">
           <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
             <div className="mb-2 flex items-center gap-2 text-xs font-bold text-slate-300"><KeyRound size={14}/> 2. 市場資料 API</div>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {([['twelve','Twelve Data'],['finnhub','Finnhub'],['massive','Massive'],['fmp','FMP'],['fred','FRED']] as const).map(([k,l]) => <label key={k} className="field-label">{l}<input type="password" className="field-input" value={keys[k]} onChange={e => setKeys(p => ({ ...p, [k]: e.target.value }))}/></label>)}
-            </div>
-            <div className="mt-2 text-[10px] text-slate-600">當沖最低建議：Twelve Data + Alpaca；其餘 API 作備援、公司資料與總經補充。</div>
+            {proxyEnabled ? (
+              <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-200">Secure API Proxy 已連線。Twelve Data / Finnhub / Massive / FMP / FRED 金鑰由伺服器端 Secrets 管理，不需要在此頁重複貼上。</div>
+            ) : (
+              <>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {([['twelve','Twelve Data'],['finnhub','Finnhub'],['massive','Massive'],['fmp','FMP'],['fred','FRED']] as const).map(([k,l]) => <label key={k} className="field-label">{l}<input type="password" className="field-input" value={keys[k]} onChange={e => setKeys(p => ({ ...p, [k]: e.target.value }))}/></label>)}
+                </div>
+                <div className="mt-2 text-[10px] text-slate-600">尚未設定 Proxy 時才使用瀏覽器 API Key fallback。</div>
+              </>
+            )}
           </div>
 
           <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
@@ -302,7 +310,7 @@ export default function DayTradingAppV5() {
         </div>
 
         <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <div className="text-[10px] text-slate-500">API Key 會自動儲存於本機瀏覽器；Alpaca Secret 使用 sessionStorage。完整分析前請先確認 Market Data 與 Alpaca Live 狀態。</div>
+          <div className="text-[10px] text-slate-500">{proxyEnabled ? '市場資料 API Key 由 Secure Proxy 管理；Alpaca Secret 仍使用 sessionStorage。' : '市場資料 API Key 暫存於本機瀏覽器；Alpaca Secret 使用 sessionStorage。'}</div>
           <button onClick={() => void refresh()} disabled={loading || !providerReady} className="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-500/40 bg-cyan-500/10 px-4 py-2 text-xs font-bold text-cyan-200 disabled:opacity-40">
             <RefreshCw size={13} className={loading ? 'animate-spin' : ''}/>{loading ? '更新分析中' : '套用設定並更新分析'}
           </button>

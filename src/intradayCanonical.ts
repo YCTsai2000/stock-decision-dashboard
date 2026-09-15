@@ -5,6 +5,7 @@ import {
   type IntradayFetchResult,
   type IntradayProvider,
 } from './intradayCore';
+import { effectiveApiKey, routeApiRequest } from './apiProxy';
 
 const REQUEST_TIMEOUT_MS = 10_000;
 const TWELVE_OUTPUT_SIZE = 5000;
@@ -12,7 +13,7 @@ const REGULAR_OPEN = 9 * 60 + 30;
 const REGULAR_CLOSE = 16 * 60;
 const MIN_RVOL_SESSIONS = 11; // current session + 10 prior sessions, matching canonical backtest.
 
-const cleanKey = (value: string | undefined) => (value ?? '').trim();
+const cleanKey = (value: string | undefined) => effectiveApiKey(value);
 const toYmd = (date: Date) => date.toISOString().slice(0, 10);
 const parseMinute = (time: string) => {
   const [h, m] = time.split(':').map(Number);
@@ -26,7 +27,7 @@ const fetchJson = async (url: string, signal?: AbortSignal): Promise<any> => {
   const abortOuter = () => controller.abort();
   signal?.addEventListener('abort', abortOuter);
   try {
-    const response = await fetch(url, { headers: { Accept: 'application/json' }, signal: controller.signal });
+    const response = await fetch(routeApiRequest(url), { headers: { Accept: 'application/json' }, signal: controller.signal });
     const json = await response.json();
     if (!response.ok) throw new Error(String(json?.message ?? json?.error ?? `HTTP ${response.status}`));
     return json;
