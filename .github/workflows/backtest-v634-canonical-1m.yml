@@ -1,12 +1,15 @@
-name: V6.3.4 canonical 1m backtest
+name: V6.3.5 canonical 1m backtest
 
 on:
   workflow_dispatch:
   push:
     paths:
       - 'scripts/backtest-v634-canonical-1m.ts'
+      - 'scripts/test-v635-canonical-aggregation.ts'
       - 'src/decisionV6.ts'
       - 'src/intraday.ts'
+      - 'src/intradayCore.ts'
+      - 'src/intradayCanonical.ts'
       - 'src/tradingProfiles.ts'
       - '.github/workflows/backtest-v634-canonical-1m.yml'
 
@@ -22,12 +25,14 @@ jobs:
         with:
           node-version: 22
       - run: npm install --no-audit --no-fund
+      - name: Test canonical completed-bar aggregation
+        run: npx --yes tsx scripts/test-v635-canonical-aggregation.ts
       - name: Run canonical 1m backtest
         run: npx --yes tsx scripts/backtest-v634-canonical-1m.ts
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: v634-canonical-1m-backtest
+          name: v635-canonical-1m-backtest
           path: backtest-output-v634-canonical-1m/
           retention-days: 30
