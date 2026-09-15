@@ -23,6 +23,11 @@ export const ADAPTIVE_LONG_RULE = {
   probeRiskFactor: 0.25,
   aRiskFactor: 0.5,
   aPlusRiskFactor: 1,
+  coreStartMinute: 10 * 60 + 15,
+  coreEndMinute: 11 * 60,
+  continuationEndMinute: 12 * 60,
+  earlyAlignedAPlusFactor: 0.5,
+  alignedContinuationFactor: 0.75,
 } as const;
 
 export const marketRegimeRiskFactor = (mode: DayTradeDecisionInput['marketMode']): number => {
@@ -38,12 +43,18 @@ const labelRegimeFactor = (decision: DayTradeDecision): number => {
   return 1;
 };
 
+const labelTimingFactor = (decision: DayTradeDecision): number => {
+  if (decision.label.includes('EARLY ALIGNED')) return ADAPTIVE_LONG_RULE.earlyAlignedAPlusFactor;
+  if (decision.label.includes('ALIGNED CONTINUATION')) return ADAPTIVE_LONG_RULE.alignedContinuationFactor;
+  return 1;
+};
+
 export const decisionRiskFactor = (decision: DayTradeDecision): number => {
   if (decision.label.includes('EVENT REVERSAL')) return 0.5;
-  const setup = decision.label.includes('B+ PROBE') ? 0.25
-    : decision.label.includes('LONG · A Profile') ? 0.5
-      : 1;
-  return setup * labelRegimeFactor(decision);
+  const setup = decision.label.includes('B+ PROBE') ? ADAPTIVE_LONG_RULE.probeRiskFactor
+    : decision.label.includes('LONG · A Profile') ? ADAPTIVE_LONG_RULE.aRiskFactor
+      : ADAPTIVE_LONG_RULE.aPlusRiskFactor;
+  return setup * labelTimingFactor(decision) * labelRegimeFactor(decision);
 };
 
 export const effectiveDecisionRiskFactor = (
@@ -140,19 +151,68 @@ const resizeLongDecision = (
   };
 };
 
+const pauseLong = (decision: DayTradeDecision, reason: string): DayTradeDecision => ({
+  ...decision,
+  direction: 'WAIT',
+  label: 'WATCH · V6.3.3 LONG FILTER',
+  reason,
+  entry: null,
+  stop: null,
+  target1: null,
+  target2: null,
+  riskPerShare: null,
+  suggestedShares: 0,
+  suggestedRiskUsd: 0,
+});
+
 const tagNormalLong = (
   input: DayTradeDecisionInput,
   normal: DayTradeDecision,
+  timingTag = '',
+  timingFactor = 1,
 ): DayTradeDecision => {
   const isAPlus = normal.label.includes('A+ Profile');
   const setupFactor = isAPlus ? ADAPTIVE_LONG_RULE.aPlusRiskFactor : ADAPTIVE_LONG_RULE.aRiskFactor;
   const regimeFactor = marketRegimeRiskFactor(input.marketMode);
-  const resized = resizeLongDecision(input, normal, setupFactor);
+  const resized = resizeLongDecision(input, normal, setupFactor * timingFactor);
+  const suffix = timingTag ? ` · ${timingTag}` : '';
   return {
     ...resized,
-    label: `${normal.label} · ${input.marketMode}`,
-    reason: `${normal.reason} V6.3.1 保留原 A/A+ 首次有效進場，不因 Second-Chance 邏輯延後；Setup risk ${Math.round(setupFactor * 100)}% × Regime ${Math.round(regimeFactor * 100)}% × Session ${Math.round(normal.phaseFactor * 100)}%。`,
+    label: `${normal.label} · ${input.marketMode}${suffix}`,
+    reason: `${normal.reason} V6.3.3：Setup risk ${Math.round(setupFactor * 100)}% × Timing ${Math.round(timingFactor * 100)}% × Regime ${Math.round(regimeFactor * 100)}% × Session ${Math.round(normal.phaseFactor * 100)}%。`,
   };
+};
+
+const applyNormalLongTimingPolicy = (
+  input: DayTradeDecisionInput,
+  normal: DayTradeDecision,
+): DayTradeDecision => {
+  const minute = input.metrics.latestMinute;
+  if (minute === null) return pauseLong(normal, 'V6.3.3：缺少盤中時間，僅觀察。');
+  const isAPlus = normal.label.includes('A+ Profile');
+
+  if (minute < ADAPTIVE_LONG_RULE.coreStartMinute) {
+    if (isAPlus && input.dailyBias === 'LONG') {
+      return tagNormalLong(input, normal, 'EARLY ALIGNED', ADAPTIVE_LONG_RULE.earlyAlignedAPlusFactor);
+    }
+    return pauseLong(normal, 'V6.3.3：09:50–10:15 ET 為價格發現期；只有 Daily LONG 的 A+ 可用半風險試單，其餘等待核心窗口。');
+  }
+
+  if (minute < ADAPTIVE_LONG_RULE.coreEndMinute) {
+    if (input.dailyBias === 'SHORT') {
+      return pauseLong(normal, 'V6.3.3：10:15–11:00 ET 雖為核心窗口，但 Daily Bias = SHORT，LONG 不逆日線趨勢。');
+    }
+    return tagNormalLong(input, normal);
+  }
+
+  if (minute < ADAPTIVE_LONG_RULE.continuationEndMinute) {
+    if (input.dailyBias !== 'LONG') {
+      return pauseLong(normal, 'V6.3.3：11:00–12:00 ET 僅保留 Daily LONG 的趨勢延續單。');
+    }
+    return tagNormalLong(input, normal, 'ALIGNED CONTINUATION', ADAPTIVE_LONG_RULE.alignedContinuationFactor);
+  }
+
+  return pauseLong(normal, 'V6.3.3：12:00 ET 後 LONG 新倉暫停；樣本顯示午盤後新突破的假突破成本偏高。');
 };
 
 const buildAdaptiveProbeLong = (
@@ -171,6 +231,14 @@ const buildAdaptiveProbeLong = (
   if (!(price > m.vwap && m.vwapSlopeUp === true && m.benchmarkAboveVwap === true && rs > 0 && price > m.orHigh)) return null;
   if (base.longScore < ADAPTIVE_LONG_RULE.minLongScore || base.longScore - base.shortScore < ADAPTIVE_LONG_RULE.minScoreLead) return null;
 
+  const inCore = minute >= ADAPTIVE_LONG_RULE.coreStartMinute && minute < ADAPTIVE_LONG_RULE.coreEndMinute;
+  const inContinuation = minute >= ADAPTIVE_LONG_RULE.coreEndMinute && minute < ADAPTIVE_LONG_RULE.continuationEndMinute;
+  if (inCore && input.dailyBias === 'SHORT') return null;
+  if (inContinuation && input.dailyBias !== 'LONG') return null;
+  if (!inCore && !inContinuation) return null;
+  const timingFactor = inContinuation ? ADAPTIVE_LONG_RULE.alignedContinuationFactor : 1;
+  const timingTag = inContinuation ? ' · ALIGNED CONTINUATION' : '';
+
   const atr = m.intradayAtr ?? Math.max(price * 0.002, 0.01);
   if (!isSecondChanceLong(input, atr)) return null;
 
@@ -187,7 +255,7 @@ const buildAdaptiveProbeLong = (
   const target2 = entry + riskPerShare * profile.target2R;
   const regimeFactor = marketRegimeRiskFactor(input.marketMode);
   const riskBudget = Math.min(
-    input.accountSizeUsd * (input.riskPerTradePct / 100) * ADAPTIVE_LONG_RULE.probeRiskFactor * regimeFactor * base.phaseFactor,
+    input.accountSizeUsd * (input.riskPerTradePct / 100) * ADAPTIVE_LONG_RULE.probeRiskFactor * timingFactor * regimeFactor * base.phaseFactor,
     base.remainingDailyRiskUsd,
   );
   const maxRiskShares = Math.floor(Math.max(0, riskBudget) / riskPerShare);
@@ -197,8 +265,8 @@ const buildAdaptiveProbeLong = (
   return {
     ...base,
     direction: 'LONG',
-    label: `LONG · B+ PROBE · ${input.marketMode} · 2ND CHANCE`,
-    reason: `V6.3.1 Probe：${profile.label} 首次突破後回測 OR15 並重新轉強；Price > VWAP、VWAP slope ↑、${profile.benchmark} > VWAP、RS ${rs.toFixed(2)}% > 0。RVOL ${rvol.toFixed(2)}x 尚未達 A 門檻，因此只用 25% Probe risk × Regime ${Math.round(regimeFactor * 100)}% × Session ${Math.round(base.phaseFactor * 100)}%。fresh B+ 不追。`,
+    label: `LONG · B+ PROBE · ${input.marketMode} · 2ND CHANCE${timingTag}`,
+    reason: `V6.3.3 Probe：${profile.label} 首次突破後回測 OR15 並重新轉強；Price > VWAP、VWAP slope ↑、${profile.benchmark} > VWAP、RS ${rs.toFixed(2)}% > 0。RVOL ${rvol.toFixed(2)}x 尚未達 A 門檻，因此用 25% Probe risk × Timing ${Math.round(timingFactor * 100)}% × Regime ${Math.round(regimeFactor * 100)}% × Session ${Math.round(base.phaseFactor * 100)}%。`,
     entry,
     stop,
     target1,
@@ -255,7 +323,7 @@ const buildEventShortDecision = (
     ...base,
     direction: 'SHORT',
     label: 'SHORT · EVENT REVERSAL',
-    reason: `V6.3.1 事件反轉：Gap ${m.gapPct?.toFixed(2)}%、RVOL ${m.rvol?.toFixed(2)}x、RS ${m.relativeStrengthPct?.toFixed(2)}%；OR15 Low 新鮮跌破（Age ${breakdownAgeMin}m ≤ ${EVENT_SHORT_RULE.maxBreakdownAgeMin}m），且 VWAP / Benchmark 同步轉弱；原型股 Stop ${stopPct.toFixed(2)}% ≤ ${EVENT_SHORT_RULE.maxUnderlyingStopPct.toFixed(1)}%。事件單使用 50% risk，再乘 Session factor。`,
+    reason: `V6.3.3 事件反轉：Gap ${m.gapPct?.toFixed(2)}%、RVOL ${m.rvol?.toFixed(2)}x、RS ${m.relativeStrengthPct?.toFixed(2)}%；OR15 Low 新鮮跌破（Age ${breakdownAgeMin}m ≤ ${EVENT_SHORT_RULE.maxBreakdownAgeMin}m），且 VWAP / Benchmark 同步轉弱；原型股 Stop ${stopPct.toFixed(2)}% ≤ ${EVENT_SHORT_RULE.maxUnderlyingStopPct.toFixed(1)}%。事件單使用 50% risk，再乘 Session factor。`,
     entry,
     stop,
     target1,
@@ -270,7 +338,7 @@ const pauseNormalShort = (decision: DayTradeDecision): DayTradeDecision => ({
   ...decision,
   direction: 'WAIT',
   label: 'WATCH · NORMAL SHORT RESEARCH',
-  reason: `V6.3.1：一般 Short 子模型仍只觀察；只有嚴格 Event Reversal Short 可以進場。原訊號：${decision.reason}`,
+  reason: `V6.3.3：一般 Short 子模型仍只觀察；只有嚴格 Event Reversal Short 可以進場。原訊號：${decision.reason}`,
   entry: null,
   stop: null,
   target1: null,
@@ -288,9 +356,9 @@ export const buildProfiledDayTradeDecision = (
   const normal = applyTradingProfile(input, base, profile);
   if (normal.hardBlock) return normal;
 
-  if (normal.direction === 'LONG') return tagNormalLong(input, normal);
   if (normal.direction === 'SHORT') return pauseNormalShort(normal);
   if (isEventShortOverride(input, base, profile)) return buildEventShortDecision(input, base, profile);
+  if (normal.direction === 'LONG') return applyNormalLongTimingPolicy(input, normal);
 
   const probe = buildAdaptiveProbeLong(input, base, profile);
   if (probe) return probe;
