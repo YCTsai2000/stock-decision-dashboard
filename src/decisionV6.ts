@@ -32,21 +32,25 @@ export const marketRegimeRiskFactor = (mode: DayTradeDecisionInput['marketMode']
   return 0.7;
 };
 
+const labelRegimeFactor = (decision: DayTradeDecision): number => {
+  if (decision.direction !== 'LONG') return 1;
+  if (decision.label.includes('RISK_OFF')) return 0.7;
+  if (decision.label.includes('NEUTRAL')) return 0.85;
+  return 1;
+};
+
 export const decisionRiskFactor = (decision: DayTradeDecision): number => {
   if (decision.label.includes('EVENT REVERSAL')) return 0.5;
-  if (decision.label.includes('B+ PROBE')) return 0.25;
-  if (decision.label.includes('LONG · A Profile')) return 0.5;
-  return 1;
+  const setup = decision.label.includes('B+ PROBE') ? 0.25
+    : decision.label.includes('LONG · A Profile') ? 0.5
+      : 1;
+  return setup * labelRegimeFactor(decision);
 };
 
 export const effectiveDecisionRiskFactor = (
   decision: DayTradeDecision,
-  marketMode: DayTradeDecisionInput['marketMode'],
-): number => {
-  const setup = decisionRiskFactor(decision);
-  if (decision.direction !== 'LONG') return setup;
-  return setup * marketRegimeRiskFactor(marketMode);
-};
+  _marketMode: DayTradeDecisionInput['marketMode'],
+): number => decisionRiskFactor(decision);
 
 type EventShortLevels = {
   entry: number;
@@ -181,11 +185,12 @@ const buildAdaptiveLongDecision = (
   const maxAllocationShares = Math.floor((input.accountSizeUsd * (input.maxAllocationPct / 100)) / entry);
   const suggestedShares = Math.max(0, Math.min(maxRiskShares, maxAllocationShares));
   const entryStyle = breakout.secondChance ? 'SECOND-CHANCE reclaim' : 'fresh OR15 breakout';
+  const regimeTag = input.marketMode;
   const label = grade === 'A+'
-    ? `LONG · A+ Profile${breakout.secondChance ? ' · 2ND CHANCE' : ''}`
+    ? `LONG · A+ Profile · ${regimeTag}${breakout.secondChance ? ' · 2ND CHANCE' : ''}`
     : grade === 'A'
-      ? `LONG · A Profile${breakout.secondChance ? ' · 2ND CHANCE' : ''}`
-      : `LONG · B+ PROBE${breakout.secondChance ? ' · 2ND CHANCE' : ''}`;
+      ? `LONG · A Profile · ${regimeTag}${breakout.secondChance ? ' · 2ND CHANCE' : ''}`
+      : `LONG · B+ PROBE · ${regimeTag}${breakout.secondChance ? ' · 2ND CHANCE' : ''}`;
 
   return {
     ...base,
