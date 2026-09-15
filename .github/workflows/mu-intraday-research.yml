@@ -12,12 +12,13 @@ on:
         required: true
         default: '2026-09-15'
   push:
-    branches: ['mu-intraday-research-*']
+    branches: ['mu-intraday-*']
     paths:
       - 'research/mu-intraday/**'
       - 'src/muBehavior.ts'
       - 'src/MuResearchPanel.tsx'
       - 'src/muLocalBacktest.ts'
+      - 'src/muExecutionReplay.ts'
       - 'src/MuBacktestPanel.tsx'
       - 'src/ModeShell.tsx'
       - '.github/workflows/mu-intraday-research.yml'
