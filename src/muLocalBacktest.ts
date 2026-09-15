@@ -16,6 +16,9 @@ export interface MuBacktestSetupResult {
   train: MuBacktestStats;
   test: MuBacktestStats;
   stress: MuBacktestStats;
+  allDates: string[];
+  trainDates: string[];
+  testDates: string[];
   gates: Record<string, boolean>;
   structureValidated: boolean;
 }
@@ -143,7 +146,7 @@ const rules:Array<{name:MuBacktestSetupName;side:'LONG'|'SHORT';test:(r:Daily)=>
 ];
 
 function stats(rows:Daily[],side:'LONG'|'SHORT',h:15|30|60,costBpsSide:number):MuBacktestStats{
-  const rtCost=2*costBpsSide/100; // bps -> percentage points
+  const rtCost=2*costBpsSide/100;
   const x=rows.map(r=>Number(r[`fwd${h}From30`])).filter(Number.isFinite).map(v=>(side==='SHORT'?-v:v)-rtCost);
   if(!x.length)return{n:0,winRate:null,avgNetPct:null,medianNetPct:null,profitFactor:null};
   const wins=x.filter(v=>v>0),losses=x.filter(v=>v<0),gw=wins.reduce((a,b)=>a+b,0),gl=-losses.reduce((a,b)=>a+b,0);
@@ -165,7 +168,7 @@ export async function runMuLocalBacktest(opts:{apiKey:string;years?:1|2;baseline
     choices.sort((a,b)=>((b.s.avgNetPct??-999)*Math.sqrt(Math.max(1,b.s.n)))-((a.s.avgNetPct??-999)*Math.sqrt(Math.max(1,a.s.n))));
     const h=choices[0]?.h??30,all=stats(hits,rule.side,h,baseline),tr=stats(train,rule.side,h,baseline),te=stats(test,rule.side,h,baseline),st=stats(test,rule.side,h,stress);
     const gates={enoughAll:all.n>=20,enoughTrain:tr.n>=12,enoughTest:te.n>=6,trainPositive:(tr.avgNetPct??-99)>0,testPositive:(te.avgNetPct??-99)>0,testPF:(te.profitFactor??0)>=1.15,stressPositive:(st.avgNetPct??-99)>0};
-    return{name:rule.name,side:rule.side,chosenHorizon:h,all,train:tr,test:te,stress:st,gates,structureValidated:Object.values(gates).every(Boolean)};
+    return{name:rule.name,side:rule.side,chosenHorizon:h,all,train:tr,test:te,stress:st,allDates:hits.map(x=>x.date),trainDates:train.map(x=>x.date),testDates:test.map(x=>x.date),gates,structureValidated:Object.values(gates).every(Boolean)};
   });
   return{generatedAt:new Date().toISOString(),source:'Massive 5-minute adjusted aggregates',start,end,sessions:rows.length,splitDate,baselineCostBpsSide:baseline,stressCostBpsSide:stress,status:results.some(x=>x.structureValidated)?'STRUCTURE_VALIDATED':'NO_VALIDATED_SETUP',setups:results};
 }
