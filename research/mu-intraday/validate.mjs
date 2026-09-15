@@ -127,10 +127,12 @@ function bootstrapMeanCI(values, reps = 1500) {
 }
 
 const all = {};
+const sourceMeta = {};
 for (const t of tickers) {
   const j = await loadGzipJson(path.join(rawDir, `${t}.json.gz`));
+  sourceMeta[t] = {source:j.source ?? 'unknown', intervalMinutes:Number(j.intervalMinutes ?? 1), provisional:Boolean(j.provisional)};
   all[t] = dailyRows(j.bars, t);
-  console.log(`${t}: ${all[t].length} sessions`);
+  console.log(`${t}: ${all[t].length} sessions (${sourceMeta[t].source})`);
 }
 if (!all.MU) throw new Error('MU raw data is required');
 
@@ -214,19 +216,23 @@ for (const setup of setupDefs) {
   });
 }
 
-const deployable = reports.filter(x => x.passed).sort((a, b) => b.qualityScore - a.qualityScore);
-const status = deployable.length ? 'DEPLOYABLE_CANDIDATES' : 'NO_DEPLOY';
+const provisional = Object.values(sourceMeta).some(x => x.provisional || x.intervalMinutes > 1);
+const statisticalPasses = reports.filter(x => x.passed).sort((a, b) => b.qualityScore - a.qualityScore);
+const deployable = provisional ? [] : statisticalPasses;
+const status = provisional ? 'PROVISIONAL_ONLY' : deployable.length ? 'DEPLOYABLE_CANDIDATES' : 'NO_DEPLOY';
 const summary = {
   generatedAt: new Date().toISOString(),
-  methodology: 'Pre-specified MU setups; horizon selected only on chronological 70% train data, then judged on untouched 30% test. Returns include configurable round-trip friction. Four time folds test regime stability. A setup is not deployable unless every gate passes.',
+  methodology: 'Pre-specified MU setups; horizon selected only on chronological 70% train data, then judged on untouched 30% test. Returns include configurable round-trip friction. Four time folds test regime stability. A setup is not deployable unless every gate passes. Five-minute fallback data may produce provisional candidates but can never pass the production deployment gate.',
+  data: {sourceMeta, researchTier: provisional ? 'PROVISIONAL_RECENT_5M' : 'FULL_1M'},
   sample: {start: dates[0] ?? null, end: dates.at(-1) ?? null, sessions: dates.length, splitDate},
   costs: {baselineBpsSide: costBpsSide, baselineRoundTripPct: baselineRoundTrip * 100, stressBpsSide, stressRoundTripPct: stressRoundTrip * 100},
-  status, deployable: deployable.map(x => ({name: x.name, side: x.side, entryMinute: x.entryMinute, horizon: x.chosenHorizon, qualityScore: x.qualityScore})),
+  status, provisionalCandidates: provisional ? statisticalPasses.map(x => ({name:x.name, side:x.side, entryMinute:x.entryMinute, horizon:x.chosenHorizon, qualityScore:x.qualityScore})) : [],
+  deployable: deployable.map(x => ({name: x.name, side: x.side, entryMinute: x.entryMinute, horizon: x.chosenHorizon, qualityScore: x.qualityScore})),
   reports,
 };
 
 await writeJson(path.join(outDir, 'validation.json'), summary);
-await writeJson(path.join(outDir, 'deployable_setups.json'), {generatedAt: summary.generatedAt, status, setups: deployable});
+await writeJson(path.join(outDir, 'deployable_setups.json'), {generatedAt: summary.generatedAt, status, researchTier: summary.data.researchTier, setups: deployable, provisionalCandidates: summary.provisionalCandidates});
 await writeCsv(path.join(outDir, 'validation.csv'), reports.map(r => ({
   setup: r.name, side: r.side, entryMinute: r.entryMinute, chosenHorizon: r.chosenHorizon,
   qualityScore: r.qualityScore, passed: r.passed,
@@ -237,4 +243,4 @@ await writeCsv(path.join(outDir, 'validation.csv'), reports.map(r => ({
   positiveFoldRatio: r.positiveFoldRatio,
 })));
 
-console.log(JSON.stringify({status, deployable: summary.deployable, reports: reports.map(r => ({name:r.name, passed:r.passed, score:r.qualityScore, horizon:r.chosenHorizon, test:r.test, stress:r.stressTest, gates:r.gateChecks}))}, null, 2));
+console.log(JSON.stringify({status, researchTier: summary.data.researchTier, provisionalCandidates: summary.provisionalCandidates, deployable: summary.deployable, reports: reports.map(r => ({name:r.name, passed:r.passed, score:r.qualityScore, horizon:r.chosenHorizon, test:r.test, stress:r.stressTest, gates:r.gateChecks}))}, null, 2));
